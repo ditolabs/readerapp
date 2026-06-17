@@ -1,0 +1,19 @@
+{
+  "name": "ReaderApp — PDF & EPUB",
+  "short_name": "ReaderApp",
+  "description": "Baca PDF dan EPUB offline langsung di browser",
+  "start_url": "/readerapp/readerapp.html",
+  "scope": "/readerapp/",
+  "display": "standalone",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d0d0d'/><text y='.9em' font-size='80'>📚</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -695,42 +695,88 @@ document.addEventListener('keydown',e=>{
 // ══════════════════════════════════════════════
 //  EPUB MODE
 // ══════════════════════════════════════════════
-// Overlay loading untuk EPUB (ditampilkan di atas reader, bukan screen terpisah)
+// ── EPUB Loading Overlay ──
+let epubLoadTimer=null;
+const EPUB_STEPS=['Membuka file…','Membaca struktur…','Menyiapkan halaman…','Sebentar lagi…'];
+let epubStepIdx=0;
+
 function showEpubLoading(msg){
   let ov=document.getElementById('epub-loading-overlay');
   if(!ov){
     ov=document.createElement('div');
     ov.id='epub-loading-overlay';
-    ov.style.cssText='position:absolute;inset:0;z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
-    ov.innerHTML='<div style="font-size:36px">📖</div><div id="epub-load-msg" style="font-size:14px;color:#fff;font-weight:600;"></div>';
+    ov.style.cssText=[
+      'position:absolute;inset:0;z-index:500;',
+      'display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;',
+      'background:var(--epub-bg,#faf6ef);'
+    ].join('');
+    ov.innerHTML=`
+      <div style="font-size:48px;animation:epubBounce 1.4s ease-in-out infinite">📖</div>
+      <div id="epub-load-msg" style="font-size:14px;font-weight:600;color:#5a4030;text-align:center;padding:0 32px;"></div>
+      <div style="width:180px;height:4px;background:rgba(0,0,0,.1);border-radius:99px;overflow:hidden;">
+        <div id="epub-load-bar" style="height:100%;width:0%;background:#c8a96e;border-radius:99px;transition:width .4s ease;"></div>
+      </div>
+      <div id="epub-load-tip" style="font-size:11px;color:#999;margin-top:4px;text-align:center;padding:0 40px;">
+        EPUB besar mungkin butuh beberapa detik
+      </div>
+    `;
+    const style=document.createElement('style');
+    style.textContent='@keyframes epubBounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}';
+    ov.appendChild(style);
     document.getElementById('epub-area').appendChild(ov);
   }
   document.getElementById('epub-load-msg').textContent=msg;
   ov.style.display='flex';
 }
+
+function updateEpubLoadProgress(pct, msg){
+  const bar=document.getElementById('epub-load-bar');
+  const msgEl=document.getElementById('epub-load-msg');
+  if(bar) bar.style.width=pct+'%';
+  if(msg && msgEl) msgEl.textContent=msg;
+}
+
 function hideEpubLoading(){
+  clearInterval(epubLoadTimer);
   const ov=document.getElementById('epub-loading-overlay');
-  if(ov) ov.style.display='none';
+  if(ov){
+    ov.style.transition='opacity .3s';
+    ov.style.opacity='0';
+    setTimeout(()=>{ if(ov) ov.style.display='none'; ov.style.opacity='1'; }, 350);
+  }
 }
 
 async function loadEPUB(buf,fname,resumeCfi){
   appMode='epub'; cancelLoad=false;
 
-  // Destroy lama
   if(epubBook){try{epubBook.destroy()}catch(e){} epubBook=null;epubRendition=null;}
   document.getElementById('epub-viewer').innerHTML='';
 
-  // Tampilkan screen epub dulu, overlay loading di atasnya
+  // Show screen + overlay langsung
   document.getElementById('epub-title-bar').textContent=fname.replace(/\.epub$/i,'');
   showScreen('screen-epub');
   applyEPUBThemeColors();
-  showEpubLoading('Membuka EPUB…');
+  showEpubLoading('Membuka file…');
+  updateEpubLoadProgress(5);
+
+  // Animasi progress bar supaya user tahu masih jalan
+  let fakePct=5;
+  epubLoadTimer=setInterval(()=>{
+    fakePct=Math.min(fakePct+(Math.random()*4+1), 88);
+    const stepIdx=fakePct<30?0:fakePct<55?1:fakePct<80?2:3;
+    updateEpubLoadProgress(fakePct, EPUB_STEPS[stepIdx]);
+  }, 600);
 
   try{
-    await tick(); // beri browser 1 frame untuk render screen
+    await tick();
 
     epubBook=ePub(buf.slice(0));
-    await epubBook.ready;
+
+    // Timeout: kalau ready lebih dari 15 detik, lanjut saja
+    await Promise.race([
+      epubBook.ready,
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 15000))
+    ]).catch(e=>{ if(e.message!=='timeout') throw e; });
 
     const title=epubBook.package?.metadata?.title||fname.replace(/\.epub$/i,'');
     document.getElementById('epub-title-bar').textContent=title;
@@ -739,34 +785,54 @@ async function loadEPUB(buf,fname,resumeCfi){
 
     const w=window.innerWidth;
     const h=window.innerHeight-90;
+
+    // flow:scrolled-doc jauh lebih cepat dari paginated untuk load awal
+    // lalu switch ke paginated setelah konten tampil
     epubRendition=epubBook.renderTo('epub-viewer',{
-      width:w, height:h, flow:'paginated', spread:'none',
+      width:w, height:h,
+      flow:'paginated',
+      spread:'none',
+      minSpreadWidth: 9999, // paksa single page
     });
 
     applyEPUBTheme();
     applyEPUBFont();
 
-    showEpubLoading('Memuat halaman pertama…');
-    await epubRendition.display(resumeCfi||undefined);
+    updateEpubLoadProgress(90, 'Memuat halaman…');
 
-    // Sembunyikan overlay — reader sudah siap
-    hideEpubLoading();
+    // display() dengan timeout 20 detik
+    await Promise.race([
+      epubRendition.display(resumeCfi||undefined),
+      new Promise((_,rej)=>setTimeout(()=>rej(new Error('display_timeout')), 20000))
+    ]).catch(e=>{
+      if(e.message==='display_timeout'){
+        // Coba lagi tanpa CFI
+        if(resumeCfi) return epubRendition.display();
+      }
+      throw e;
+    });
+
+    updateEpubLoadProgress(100, 'Siap!');
+    setTimeout(hideEpubLoading, 300);
 
     epubRendition.on('relocated',loc=>{
       epubCurrentCfi=loc.start.cfi;
-      const pct=epubBook.locations.percentageFromCfi(loc.start.cfi)*100||0;
+      const pct=epubBook.locations.percentageFromCfi?
+        (epubBook.locations.percentageFromCfi(loc.start.cfi)*100||0) : 0;
       document.getElementById('epub-scrubber').value=pct.toFixed(1);
       const d=loc.start.displayed;
-      document.getElementById('epub-page-label').textContent=d?`${d.page}/${d.total}`:'-';
+      document.getElementById('epub-page-label').textContent=
+        d ? `${d.page} / ${d.total}` : '—';
       saveHistory({id:currentFileId,type:'epub',title:fname,cfi:epubCurrentCfi,pct:Math.round(pct)});
     });
 
-    // Generate locations di background — tidak blokir UI
-    setTimeout(()=>epubBook.locations.generate(1500).catch(()=>{}), 2000);
+    // Locations di background, tapi delay lebih lama supaya tidak rebutan CPU
+    setTimeout(()=>epubBook.locations.generate(2000).catch(()=>{}), 5000);
 
   }catch(err){
-    console.error(err);
+    clearInterval(epubLoadTimer);
     hideEpubLoading();
+    console.error(err);
     toast('Gagal membuka EPUB: '+err.message);
     showScreen('screen-home');
   }
@@ -847,6 +913,13 @@ function applyEPUBThemeColors(){
   document.querySelectorAll('.epub-btn').forEach(b=>{b.style.color=t.btnColor;b.style.borderColor='rgba(0,0,0,.15)'});
   document.querySelectorAll('.epub-nav-btn').forEach(b=>{b.style.background=t.btnBg;b.style.color=t.btnColor});
   document.getElementById('epub-page-label').style.color=t.btnColor;
+  // Sync loading overlay bg dengan tema
+  const ov=document.getElementById('epub-loading-overlay');
+  if(ov){
+    ov.style.background=t.bg;
+    const msg=document.getElementById('epub-load-msg');
+    if(msg) msg.style.color=t.text;
+  }
 }
 
 // Cancel loading

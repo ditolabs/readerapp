@@ -239,8 +239,11 @@ html,body{height:100%;background:var(--bg);color:var(--text);
 
 <!-- ③ PDF READER -->
 <div id="screen-pdf" class="screen">
-  <div class="top-bar" id="pdf-topbar">
-    <button class="btn-icon" id="pdf-back" title="Kembali">←</button>
+  <!-- Tombol back selalu tampil, tidak ikut auto-hide -->
+  <div style="position:absolute;top:10px;left:10px;z-index:200;">
+    <button class="btn-icon" id="pdf-back" title="Kembali" style="background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">←</button>
+  </div>
+  <div class="top-bar" id="pdf-topbar" style="padding-left:58px;">
     <div class="top-title" id="pdf-title">—</div>
     <div class="top-page" id="pdf-top-page">1/1</div>
   </div>
@@ -673,9 +676,13 @@ function pdfShowUI(){
     pdfUIVisible=false;
   },3500);
 }
-document.getElementById('pdf-stage').addEventListener('click',()=>pdfUIVisible?clearTimeout(pdfUITimer):pdfShowUI());
-document.getElementById('pdf-bottombar').addEventListener('pointerdown',pdfShowUI);
-document.getElementById('pdf-topbar').addEventListener('pointerdown',pdfShowUI);
+// Tap di mana saja pada reader untuk toggle UI (kecuali tombol back)
+document.getElementById('screen-pdf').addEventListener('click', e=>{
+  if(e.target.id==='pdf-back'||e.target.closest('#pdf-back')) return;
+  pdfUIVisible ? clearTimeout(pdfUITimer) : pdfShowUI();
+});
+document.getElementById('pdf-bottombar').addEventListener('pointerdown', e=>{ e.stopPropagation(); pdfShowUI(); });
+document.getElementById('pdf-topbar').addEventListener('pointerdown', e=>{ e.stopPropagation(); pdfShowUI(); });
 
 document.addEventListener('keydown',e=>{
   if(appMode!=='pdf'||!pdfFlip) return;
@@ -688,55 +695,79 @@ document.addEventListener('keydown',e=>{
 // ══════════════════════════════════════════════
 //  EPUB MODE
 // ══════════════════════════════════════════════
+// Overlay loading untuk EPUB (ditampilkan di atas reader, bukan screen terpisah)
+function showEpubLoading(msg){
+  let ov=document.getElementById('epub-loading-overlay');
+  if(!ov){
+    ov=document.createElement('div');
+    ov.id='epub-loading-overlay';
+    ov.style.cssText='position:absolute;inset:0;z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);';
+    ov.innerHTML='<div style="font-size:36px">📖</div><div id="epub-load-msg" style="font-size:14px;color:#fff;font-weight:600;"></div>';
+    document.getElementById('epub-area').appendChild(ov);
+  }
+  document.getElementById('epub-load-msg').textContent=msg;
+  ov.style.display='flex';
+}
+function hideEpubLoading(){
+  const ov=document.getElementById('epub-loading-overlay');
+  if(ov) ov.style.display='none';
+}
+
 async function loadEPUB(buf,fname,resumeCfi){
-  appMode='epub';cancelLoad=false;
-  showScreen('screen-progress');
-  document.getElementById('prog-fill').className='prog-bar-fill epub-fill';
-  document.getElementById('prog-fill').style.width='0%';
-  document.getElementById('prog-label').textContent=fname;
-  document.getElementById('prog-sub').textContent='Membaca struktur EPUB…';
-  document.getElementById('prog-num').textContent='📖';
+  appMode='epub'; cancelLoad=false;
+
+  // Destroy lama
+  if(epubBook){try{epubBook.destroy()}catch(e){} epubBook=null;epubRendition=null;}
+  document.getElementById('epub-viewer').innerHTML='';
+
+  // Tampilkan screen epub dulu, overlay loading di atasnya
+  document.getElementById('epub-title-bar').textContent=fname.replace(/\.epub$/i,'');
+  showScreen('screen-epub');
+  applyEPUBThemeColors();
+  showEpubLoading('Membuka EPUB…');
 
   try{
-    if(epubBook){try{epubBook.destroy()}catch(e){} epubBook=null;epubRendition=null;}
-    document.getElementById('prog-fill').style.width='30%';
+    await tick(); // beri browser 1 frame untuk render screen
 
     epubBook=ePub(buf.slice(0));
     await epubBook.ready;
-    document.getElementById('prog-fill').style.width='70%';
 
     const title=epubBook.package?.metadata?.title||fname.replace(/\.epub$/i,'');
     document.getElementById('epub-title-bar').textContent=title;
 
     if(epubRendition){try{epubRendition.destroy()}catch(e){}}
-    document.getElementById('epub-viewer').innerHTML='';
 
     const w=window.innerWidth;
     const h=window.innerHeight-90;
     epubRendition=epubBook.renderTo('epub-viewer',{
-      width:w,height:h,flow:'paginated',spread:'none',
+      width:w, height:h, flow:'paginated', spread:'none',
     });
 
-    applyEPUBTheme();applyEPUBFont();
+    applyEPUBTheme();
+    applyEPUBFont();
+
+    showEpubLoading('Memuat halaman pertama…');
     await epubRendition.display(resumeCfi||undefined);
-    document.getElementById('prog-fill').style.width='100%';
+
+    // Sembunyikan overlay — reader sudah siap
+    hideEpubLoading();
 
     epubRendition.on('relocated',loc=>{
       epubCurrentCfi=loc.start.cfi;
       const pct=epubBook.locations.percentageFromCfi(loc.start.cfi)*100||0;
       document.getElementById('epub-scrubber').value=pct.toFixed(1);
-      document.getElementById('epub-page-label').textContent=
-        loc.start.displayed?`${loc.start.displayed.page}/${loc.start.displayed.total}`:'—';
+      const d=loc.start.displayed;
+      document.getElementById('epub-page-label').textContent=d?`${d.page}/${d.total}`:'-';
       saveHistory({id:currentFileId,type:'epub',title:fname,cfi:epubCurrentCfi,pct:Math.round(pct)});
     });
 
-    // Generate locations in background
-    epubBook.locations.generate(1000).then(()=>{});
+    // Generate locations di background — tidak blokir UI
+    setTimeout(()=>epubBook.locations.generate(1500).catch(()=>{}), 2000);
 
-    showScreen('screen-epub');
-    applyEPUBThemeColors();
   }catch(err){
-    console.error(err);toast('Gagal membuka EPUB: '+err.message);
+    console.error(err);
+    hideEpubLoading();
+    toast('Gagal membuka EPUB: '+err.message);
     showScreen('screen-home');
   }
 }

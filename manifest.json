@@ -2,7 +2,7 @@
   "name": "ReaderApp — PDF & EPUB",
   "short_name": "ReaderApp",
   "description": "Baca PDF dan EPUB offline langsung di browser",
-  "start_url": "/readerapp/readerapp.html",
+  "start_url": "/readerapp/index.html",
   "scope": "/readerapp/",
   "display": "standalone",
   "background_color": "#0d0d0d",

@@ -1,6 +1,6 @@
 const CACHE='readerapp-v2';
 const BASE=self.location.pathname.replace('/sw.js','');
-const ASSETS=[BASE+'/readerapp.html',BASE+'/manifest.json'];
+const ASSETS=[BASE+'/index.html',BASE+'/manifest.json'];
 self.addEventListener('install',e=>{
   e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting()));
 });

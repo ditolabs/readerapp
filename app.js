@@ -477,7 +477,7 @@
   }
 
 // ============================================================
-// 9. EPUB LOADER (Final Fix)
+// 9. EPUB LOADER (Fix 90% Hang)
 // ============================================================
 async function loadEpub(file) {
   showScreen('progress');
@@ -487,19 +487,19 @@ async function loadEpub(file) {
   dom.progSub.textContent = 'Mengekstrak dokumen...';
   state.cancelFlag = false;
 
-  // Jeda sesaat agar browser sempat merender UI Loading
+  // Jeda sesaat agar UI Loading muncul
   await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
+    // Ambil buffer mentah dari file
     const arrayBuffer = await file.arrayBuffer();
-    // Menggunakan Blob URL kembali karena jauh lebih stabil untuk epub.js
-    const blob = new Blob([arrayBuffer], { type: 'application/epub+zip' });
-    const url = URL.createObjectURL(blob);
 
-    const book = ePub(url);
+    // PENTING: Langsung gunakan ArrayBuffer, JANGAN gunakan Blob URL
+    // Ini menghindari pemblokiran internal oleh Brave Shields / ekstensi keamanan
+    const book = ePub(arrayBuffer);
     state.epubBook = book;
 
-    // Simulasi progress bar
+    // Simulasi progress bar (mentok di 90% sampai book.ready selesai)
     let simProgress = 0;
     const simInterval = setInterval(() => {
       if (simProgress < 90) {
@@ -510,19 +510,20 @@ async function loadEpub(file) {
       }
     }, 200);
 
-    // Tunggu buku selesai diurai oleh JSZip
+    // Tunggu ekstraksi JSZip selesai
     await book.ready;
 
+    // Ekstraksi sukses! Hentikan simulasi dan set ke 100%
     clearInterval(simInterval);
     dom.progNum.textContent = '100';
     dom.progFill.style.width = '100%';
     dom.progSub.textContent = 'Menata halaman...';
     updateHistoryProgress(file.name, 100);
 
-    // PENTING: Tampilkan layar EPUB sekarang sebelum proses render dilakukan.
-    // Jika kondisinya display: none, width/height iframe jadi 0 dan epub.js akan macet.
+    // Tampilkan layar EPUB sekarang sebelum proses render dilakukan
+    // Mencegah error pembacaan dimensi iframe menjadi 0x0
     showScreen('epub');
-    dom.epubViewer.style.opacity = '0'; // Sembunyikan isi sejenak agar transisi mulus
+    dom.epubViewer.style.opacity = '0'; // Sembunyikan sejenak
 
     const rendition = book.renderTo('epub-viewer', {
       width: '100%',
@@ -533,10 +534,10 @@ async function loadEpub(file) {
     });
     state.epubRendition = rendition;
 
-    // Render buku (karena layar sudah "active", DOM kini punya dimensi lebar x tinggi yang valid)
+    // Render buku
     await rendition.display();
 
-    // Kembalikan visibilitas layarnya
+    // Tampilkan layar yang sudah dirender
     dom.epubViewer.style.opacity = '1';
 
     // Set informasi judul dan total halaman
@@ -544,7 +545,7 @@ async function loadEpub(file) {
     dom.epubPageLabel.textContent = '1 / ' + (book.navigation ? book.navigation.length : '?');
     state.epubCurrentLocation = rendition.currentLocation();
 
-    // Event listener navigasi halaman bawah
+    // Event listener navigasi halaman
     rendition.on('relocated', (location) => {
       state.epubCurrentLocation = location;
       const total = book.navigation ? book.navigation.length : 1;
@@ -573,7 +574,7 @@ async function loadEpub(file) {
       showScreen('home');
     };
 
-    // Event listener menu pengaturan Font & Tema
+    // Event listener menu pengaturan
     dom.fontSm.onclick = () => {
       const current = rendition.themes.get('fontSize') || '1em';
       const size = parseFloat(current) - 0.1;
@@ -609,9 +610,6 @@ async function loadEpub(file) {
     };
 
     state.isEpub = true;
-    
-    // Bebaskan URL Object dari memori browser karena isi buku sudah di-load
-    URL.revokeObjectURL(url);
 
   } catch (err) {
     console.error('EPUB Load Error:', err);
@@ -619,7 +617,6 @@ async function loadEpub(file) {
     showScreen('home');
   }
 }
-
 
 function setThemeActive(id) {
   [dom.themeSepia, dom.themeWhite, dom.themeDark].forEach((el) =>

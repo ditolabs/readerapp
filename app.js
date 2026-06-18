@@ -477,7 +477,7 @@
   }
 
 // ============================================================
-// 9. EPUB LOADER (Diperbaiki)
+// 9. EPUB LOADER (Final Fix)
 // ============================================================
 async function loadEpub(file) {
   showScreen('progress');
@@ -487,36 +487,42 @@ async function loadEpub(file) {
   dom.progSub.textContent = 'Mengekstrak dokumen...';
   state.cancelFlag = false;
 
-  // Beri waktu 100ms agar browser bisa merender UI Loading terlebih dahulu (mencegah freeze)
+  // Jeda sesaat agar browser sempat merender UI Loading
   await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
     const arrayBuffer = await file.arrayBuffer();
+    // Menggunakan Blob URL kembali karena jauh lebih stabil untuk epub.js
+    const blob = new Blob([arrayBuffer], { type: 'application/epub+zip' });
+    const url = URL.createObjectURL(blob);
 
-    // Buat simulasi loading karena epub.js tidak memiliki progress event yang detail
+    const book = ePub(url);
+    state.epubBook = book;
+
+    // Simulasi progress bar
     let simProgress = 0;
     const simInterval = setInterval(() => {
       if (simProgress < 90) {
-        simProgress += Math.floor(Math.random() * 10) + 5; // Naik acak 5-15%
+        simProgress += Math.floor(Math.random() * 10) + 5;
         if (simProgress > 90) simProgress = 90;
         dom.progNum.textContent = simProgress;
         dom.progFill.style.width = simProgress + '%';
       }
-    }, 400);
+    }, 200);
 
-    // Langsung gunakan arrayBuffer (lebih efisien dan tidak rakus memori)
-    const book = ePub(arrayBuffer);
-    state.epubBook = book;
-
-    book.ready.then(() => {
-      clearInterval(simInterval);
-      dom.progNum.textContent = '100';
-      dom.progFill.style.width = '100%';
-      dom.progSub.textContent = 'Siap dibaca';
-      updateHistoryProgress(file.name, 100);
-    });
-
+    // Tunggu buku selesai diurai oleh JSZip
     await book.ready;
+
+    clearInterval(simInterval);
+    dom.progNum.textContent = '100';
+    dom.progFill.style.width = '100%';
+    dom.progSub.textContent = 'Menata halaman...';
+    updateHistoryProgress(file.name, 100);
+
+    // PENTING: Tampilkan layar EPUB sekarang sebelum proses render dilakukan.
+    // Jika kondisinya display: none, width/height iframe jadi 0 dan epub.js akan macet.
+    showScreen('epub');
+    dom.epubViewer.style.opacity = '0'; // Sembunyikan isi sejenak agar transisi mulus
 
     const rendition = book.renderTo('epub-viewer', {
       width: '100%',
@@ -527,13 +533,18 @@ async function loadEpub(file) {
     });
     state.epubRendition = rendition;
 
+    // Render buku (karena layar sudah "active", DOM kini punya dimensi lebar x tinggi yang valid)
     await rendition.display();
 
+    // Kembalikan visibilitas layarnya
+    dom.epubViewer.style.opacity = '1';
+
+    // Set informasi judul dan total halaman
     dom.epubTitle.textContent = file.name;
     dom.epubPageLabel.textContent = '1 / ' + (book.navigation ? book.navigation.length : '?');
     state.epubCurrentLocation = rendition.currentLocation();
 
-    // Event listener dll. tetap sama...
+    // Event listener navigasi halaman bawah
     rendition.on('relocated', (location) => {
       state.epubCurrentLocation = location;
       const total = book.navigation ? book.navigation.length : 1;
@@ -562,7 +573,7 @@ async function loadEpub(file) {
       showScreen('home');
     };
 
-    // Pengaturan Font & Tema
+    // Event listener menu pengaturan Font & Tema
     dom.fontSm.onclick = () => {
       const current = rendition.themes.get('fontSize') || '1em';
       const size = parseFloat(current) - 0.1;
@@ -597,8 +608,10 @@ async function loadEpub(file) {
       dom.epubSettings.style.display = dom.epubSettings.style.display === 'block' ? 'none' : 'block';
     };
 
-    showScreen('epub');
     state.isEpub = true;
+    
+    // Bebaskan URL Object dari memori browser karena isi buku sudah di-load
+    URL.revokeObjectURL(url);
 
   } catch (err) {
     console.error('EPUB Load Error:', err);
@@ -606,6 +619,7 @@ async function loadEpub(file) {
     showScreen('home');
   }
 }
+
 
 function setThemeActive(id) {
   [dom.themeSepia, dom.themeWhite, dom.themeDark].forEach((el) =>

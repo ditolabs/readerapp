@@ -184,12 +184,10 @@
   }
 </script>
 
-<!-- StPageFlip (page-flip animation) via CDN -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/StPageFlip/2.0.7/page-flip.browser.js"></script>
+<!-- StPageFlip TIDAK dipakai lagi — diganti SimplePDFViewer di app.js -->
 
-<!-- Foliate-js (EPUB renderer) — embedded minimal karena belum tersedia di CDN publik -->
-<!-- Jika sudah punya foliate.js terpisah, ganti dengan: <script src="foliate.js"></script> -->
-<script src="foliate.js" onerror="console.warn('Foliate.js tidak ditemukan, fallback ke parser bawaan')"></script>
+<!-- Foliate-js (EPUB renderer) — opsional, fallback ke parser bawaan jika tidak ada -->
+<script src="foliate.js" onerror="console.info('Foliate.js tidak ada, menggunakan parser bawaan')"></script>
 
 <!-- App logic -->
 <script src="app.js"></script>

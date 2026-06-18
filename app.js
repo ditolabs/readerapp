@@ -1,11 +1,79 @@
 /* ════════════════════════════════════════
    ReaderApp — app.js
+   v2 — Fix: St.PageFlip → SimpleFlip, EPUB DIY fix, PDF background render
    ════════════════════════════════════════ */
 
 'use strict';
 
 // ══════════════════════════════════════════════
-//  INDEXEDDB — simpan file binary + history
+//  SIMPLEPDF VIEWER — pengganti StPageFlip
+//  (Swipe canvas-based, tanpa library eksternal)
+// ══════════════════════════════════════════════
+
+class SimplePDFViewer {
+  constructor(container, { width, height }) {
+    this.container = container;
+    this.width     = width;
+    this.height    = height;
+    this.pages     = [];
+    this.current   = 0;
+    this._handlers = {};
+
+    this.canvas = document.createElement('canvas');
+    this.canvas.style.cssText = `display:block;max-width:100%;max-height:100%;
+      border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,.6);touch-action:pan-y`;
+    this.ctx = this.canvas.getContext('2d');
+    container.innerHTML = '';
+    container.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%';
+    container.appendChild(this.canvas);
+
+    // Swipe
+    let tx = 0;
+    this.canvas.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+    this.canvas.addEventListener('touchend', e => {
+      const dx = e.changedTouches[0].clientX - tx;
+      if (Math.abs(dx) > 50) dx < 0 ? this.flipNext() : this.flipPrev();
+    }, { passive: true });
+  }
+
+  loadFromImages(images) {
+    this.pages = images;
+    this._draw(this.current);
+  }
+
+  _draw(idx) {
+    if (!this.pages[idx]) return;
+    const img = new Image();
+    img.onload = () => {
+      this.canvas.width  = img.naturalWidth;
+      this.canvas.height = img.naturalHeight;
+      this.ctx.drawImage(img, 0, 0);
+    };
+    img.src = this.pages[idx];
+  }
+
+  turnToPage(idx) {
+    idx = Math.max(0, Math.min(this.pages.length - 1, idx));
+    if (idx === this.current) return;
+    this.current = idx;
+    this._draw(idx);
+    this._fire('flip', idx);
+  }
+
+  flipNext() { this.turnToPage(this.current + 1); }
+  flipPrev() { this.turnToPage(this.current - 1); }
+
+  on(event, fn) { this._handlers[event] = fn; return this; }
+  _fire(event, data) { this._handlers[event]?.({ data }); }
+
+  destroy() {
+    this.pages = [];
+    this.container.innerHTML = '';
+  }
+}
+
+// ══════════════════════════════════════════════
+//  INDEXEDDB
 // ══════════════════════════════════════════════
 
 const DB_NAME = 'ReaderAppDB';
@@ -74,7 +142,7 @@ function dbClear(store) {
 // ══════════════════════════════════════════════
 
 let appMode       = null;
-let pdfFlip       = null;
+let pdfFlip       = null;   // SimplePDFViewer instance
 let pdfTotal      = 0;
 let pdfCurrent    = 0;
 let pdfImages     = [];
@@ -194,7 +262,6 @@ document.getElementById('btn-clear-all').addEventListener('click', async () => {
   toast('Riwayat dihapus');
 });
 
-// ── Open from history ──
 async function openFromHistory(h) {
   const stored = await dbGet('files', h.id);
   if (!stored || !stored.buf) {
@@ -245,8 +312,6 @@ async function handleNewFile(file) {
     const buf = await file.arrayBuffer();
     const id  = file.name;
     currentFileId = id;
-
-    // Store file in IndexedDB (overwrite same file)
     await dbPut('files', { id, buf, name: file.name });
 
     if (type === 'pdf') {
@@ -262,51 +327,91 @@ async function handleNewFile(file) {
 }
 
 // ══════════════════════════════════════════════
-//  PDF READER
+//  PDF READER — Background render + instant page 1
 // ══════════════════════════════════════════════
 
 async function loadPDF(buf, fname, resumePage) {
-  appMode = 'pdf';
+  appMode    = 'pdf';
   cancelLoad = false;
+  pdfImages  = [];
+  pdfTotal   = 0;
+
+  // Validasi pdfjsLib
+  if (typeof pdfjsLib === 'undefined') {
+    toast('PDF.js gagal dimuat. Coba reload halaman.');
+    return;
+  }
+
+  // Progress screen
   showScreen('screen-progress');
   document.getElementById('prog-label').textContent = fname;
-  document.getElementById('prog-sub').textContent   = 'Merender halaman…';
+  document.getElementById('prog-sub').textContent   = 'Membuka file…';
+  document.getElementById('prog-num').textContent   = '0';
   document.getElementById('prog-fill').className    = 'prog-bar-fill pdf-fill';
+  document.getElementById('prog-fill').style.width  = '0%';
 
+  let pdf;
   try {
-    // PDF.js loaded via CDN in index.html
-    const pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
-    pdfTotal   = pdf.numPages;
-    pdfImages  = [];
+    pdf = await pdfjsLib.getDocument({ data: buf.slice(0) }).promise;
+  } catch (err) {
+    toast('Gagal membuka PDF: ' + err.message);
+    showScreen('screen-home');
+    return;
+  }
 
-    for (let i = 1; i <= pdfTotal; i++) {
-      if (cancelLoad) { showScreen('screen-home'); return; }
+  pdfTotal = pdf.numPages;
+  document.getElementById('prog-sub').textContent = 'Merender halaman…';
 
-      const src = await renderPDFPage(pdf, i);
-      pdfImages.push(src);
+  // ── Render halaman 1 dulu, langsung tampil ke reader ──
+  try {
+    const firstSrc = await renderPDFPage(pdf, resumePage + 1 || 1);
+    pdfImages[resumePage || 0] = firstSrc;
+  } catch (err) {
+    toast('Gagal merender halaman pertama: ' + err.message);
+    showScreen('screen-home');
+    return;
+  }
 
-      const pct = Math.round(i / pdfTotal * 100);
-      document.getElementById('prog-num').textContent  = pct;
-      document.getElementById('prog-fill').style.width = pct + '%';
-      await tick();
+  if (cancelLoad) { showScreen('screen-home'); return; }
+
+  // Simpan history & buka reader dengan halaman 1
+  await saveHistory({ id: currentFileId, type: 'pdf', title: fname, page: resumePage || 0, total: pdfTotal, pct: 0 });
+  buildPDFReader(fname, resumePage || 0);
+  showScreen('screen-pdf');
+
+  // ── Render sisa halaman di background ──
+  renderPDFBackground(pdf, fname, resumePage || 0);
+}
+
+async function renderPDFBackground(pdf, fname, startPage) {
+  const total = pdfTotal;
+  // Render semua halaman kecuali yang sudah ada
+  for (let i = 1; i <= total; i++) {
+    if (cancelLoad) return;
+    if (pdfImages[i - 1]) continue; // skip yang sudah dirender
+
+    try {
+      pdfImages[i - 1] = await renderPDFPage(pdf, i);
+    } catch (e) {
+      console.warn('Gagal render halaman', i, e);
+      continue;
     }
 
-    if (cancelLoad) { showScreen('screen-home'); return; }
+    // Tambahkan thumbnail saat halaman selesai dirender
+    addPDFThumb(i - 1);
 
-    await saveHistory({ id: currentFileId, type: 'pdf', title: fname, page: resumePage || 0, total: pdfTotal, pct: 0 });
-    buildPDFReader(fname, resumePage || 0);
-    showScreen('screen-pdf');
+    // Update viewer jika halaman ini belum ada di SimplePDFViewer
+    if (pdfFlip) {
+      pdfFlip.pages = pdfImages.slice(); // update referensi
+    }
 
-  } catch (err) {
-    console.error('loadPDF error:', err);
-    toast('Gagal memuat PDF: ' + err.message);
-    showScreen('screen-home');
+    await tick();
   }
 }
 
 async function renderPDFPage(pdf, n) {
-  const page = await pdf.getPage(n);
-  const vp0  = page.getViewport({ scale: 1 });
+  const page  = await pdf.getPage(n);
+  const vp0   = page.getViewport({ scale: 1 });
   const scale = Math.min(
     (window.screen.width * window.devicePixelRatio * .9) / vp0.width,
     2.5
@@ -322,60 +427,62 @@ async function renderPDFPage(pdf, n) {
 function buildPDFReader(fname, resumePage) {
   const bookEl = document.getElementById('pdf-book');
   const thumbs = document.getElementById('pdf-thumbs');
-  bookEl.innerHTML = '';
-  thumbs.innerHTML = '';
+  bookEl.innerHTML  = '';
+  thumbs.innerHTML  = '';
 
-  const bh = Math.floor(window.innerHeight * .80);
-  const bw = Math.min(Math.floor(bh / 1.414), window.innerWidth - 20);
-  const fh = Math.floor(bw * 1.414);
+  const bw = Math.min(window.innerWidth - 20, 480);
+  const bh = Math.floor(window.innerHeight * 0.82);
 
-  // Build page elements for StPageFlip
-  pdfImages.forEach((src, i) => {
-    const div = document.createElement('div');
-    div.className = 'pf-page';
-    div.style.cssText = `width:${bw}px;height:${fh}px`;
-    const img = new Image();
-    img.src = src;
-    img.alt = `Halaman ${i + 1}`;
-    div.appendChild(img);
-    bookEl.appendChild(div);
+  // Init viewer dengan halaman yang sudah ada
+  pdfFlip = new SimplePDFViewer(bookEl, { width: bw, height: bh });
+  pdfFlip.loadFromImages(pdfImages);
+  pdfFlip.current = resumePage;
+  pdfFlip._draw(resumePage);
+  pdfFlip.on('flip', e => onPDFFlip(e.data));
 
-    const th = document.createElement('div');
-    th.className     = 'thumb';
-    th.dataset.i     = i;
-    const ti = new Image();
-    ti.src = src;
-    ti.alt = `Thumbnail halaman ${i + 1}`;
-    th.appendChild(ti);
-    th.addEventListener('click', () => pdfFlip.turnToPage(i));
-    thumbs.appendChild(th);
-  });
-
-  // Init StPageFlip
-  pdfFlip = new St.PageFlip(bookEl, {
-    width: bw,
-    height: fh,
-    showCover: false,
-    mobileScrollSupport: false,
-  });
-  pdfFlip.loadFromHTML(bookEl.querySelectorAll('.pf-page'));
-
+  // Scrubber
   const sc = document.getElementById('pdf-scrubber');
   sc.max   = pdfTotal - 1;
   sc.value = resumePage;
+  sc.addEventListener('input', () => {
+    const pg = +sc.value;
+    if (pdfImages[pg]) {
+      pdfFlip.turnToPage(pg);
+    } else {
+      // Halaman belum siap, tunggu sebentar
+      toast('Halaman sedang dimuat…');
+    }
+  });
 
-  pdfFlip.on('flip', e => onPDFFlip(e.data));
-
-  // Set scrubber change
-  sc.addEventListener('input', () => pdfFlip.turnToPage(+sc.value));
-
-  // Resume at page
-  if (resumePage > 0) {
-    setTimeout(() => pdfFlip.turnToPage(resumePage), 300);
-  }
+  // Thumbnail halaman pertama
+  if (pdfImages[resumePage]) addPDFThumb(resumePage, true);
 
   document.getElementById('pdf-title').textContent = fname;
   updatePDFUI(resumePage);
+}
+
+function addPDFThumb(idx, active = false) {
+  // Cek apakah thumbnail sudah ada
+  if (document.querySelector(`#pdf-thumbs .thumb[data-i="${idx}"]`)) return;
+
+  const thumbs = document.getElementById('pdf-thumbs');
+  const th = document.createElement('div');
+  th.className  = 'thumb' + (active ? ' active' : '');
+  th.dataset.i  = idx;
+  const ti = new Image();
+  ti.src = pdfImages[idx];
+  ti.alt = `Halaman ${idx + 1}`;
+  th.appendChild(ti);
+  th.addEventListener('click', () => {
+    if (pdfImages[idx]) pdfFlip.turnToPage(idx);
+    else toast('Halaman sedang dimuat…');
+  });
+
+  // Insert di posisi yang benar (sorted by idx)
+  const existing = Array.from(thumbs.children);
+  const after = existing.find(el => parseInt(el.dataset.i) > idx);
+  if (after) thumbs.insertBefore(th, after);
+  else thumbs.appendChild(th);
 }
 
 function onPDFFlip(idx) {
@@ -400,8 +507,8 @@ function updatePDFUI(idx) {
   document.getElementById('pdf-top-page').textContent =
     `${idx + 1}/${pdfTotal}`;
 
-  document.querySelectorAll('#pdf-thumbs .thumb').forEach((t, i) => {
-    t.classList.toggle('active', i === idx);
+  document.querySelectorAll('#pdf-thumbs .thumb').forEach(t => {
+    t.classList.toggle('active', parseInt(t.dataset.i) === idx);
   });
   const at = document.querySelector(`#pdf-thumbs .thumb[data-i="${idx}"]`);
   if (at) at.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
@@ -412,20 +519,23 @@ function updatePDFUI(idx) {
   document.getElementById('pdf-last').disabled  = idx >= pdfTotal - 1;
 }
 
-// PDF navigation buttons
-document.getElementById('pdf-prev').addEventListener('click', () => pdfFlip?.flipPrev());
-document.getElementById('pdf-next').addEventListener('click', () => pdfFlip?.flipNext());
+// PDF nav
+document.getElementById('pdf-prev').addEventListener('click', () => {
+  if (!pdfImages[pdfFlip.current - 1]) { toast('Halaman sedang dimuat…'); return; }
+  pdfFlip?.flipPrev();
+});
+document.getElementById('pdf-next').addEventListener('click', () => {
+  if (!pdfImages[pdfFlip.current + 1]) { toast('Halaman sedang dimuat…'); return; }
+  pdfFlip?.flipNext();
+});
 document.getElementById('pdf-first').addEventListener('click', () => pdfFlip?.turnToPage(0));
 document.getElementById('pdf-last').addEventListener('click', () => pdfFlip?.turnToPage(pdfTotal - 1));
 
 document.getElementById('pdf-back').addEventListener('click', () => {
-  // Memory cleanup
-  if (pdfFlip) {
-    try { pdfFlip.destroy(); } catch (e) {}
-    pdfFlip = null;
-  }
-  pdfImages = [];
-  document.getElementById('pdf-book').innerHTML  = '';
+  cancelLoad = true;
+  if (pdfFlip) { try { pdfFlip.destroy(); } catch(e) {} pdfFlip = null; }
+  pdfImages  = [];
+  document.getElementById('pdf-book').innerHTML   = '';
   document.getElementById('pdf-thumbs').innerHTML = '';
   fileInput.value = '';
   renderHistory();
@@ -449,15 +559,11 @@ document.getElementById('screen-pdf').addEventListener('click', e => {
   if (e.target.closest('#pdf-back, .btn-nav, .thumb, .scrubber')) return;
   pdfUIVisible ? null : pdfShowUI();
 });
-
 document.getElementById('pdf-bottombar').addEventListener('pointerdown', e => {
-  e.stopPropagation();
-  pdfShowUI();
+  e.stopPropagation(); pdfShowUI();
 });
-
 document.getElementById('pdf-topbar').addEventListener('pointerdown', e => {
-  e.stopPropagation();
-  pdfShowUI();
+  e.stopPropagation(); pdfShowUI();
 });
 
 // Keyboard nav
@@ -474,7 +580,7 @@ document.addEventListener('keydown', e => {
 });
 
 // ══════════════════════════════════════════════
-//  EPUB READER
+//  EPUB READER — Fix: loading overlay + DIY fallback
 // ══════════════════════════════════════════════
 
 const EPUB_STEPS = ['Membuka file…', 'Membaca isi buku…', 'Menyiapkan tampilan…', 'Sebentar lagi…'];
@@ -499,8 +605,9 @@ function showEpubLoading(msg) {
   }
   const t = themes[epubTheme];
   ov.style.background = t.bg;
-  document.getElementById('epub-load-msg').style.color = t.text;
-  document.getElementById('epub-load-msg').textContent = msg;
+  ov.style.color      = t.text;
+  const m = document.getElementById('epub-load-msg');
+  if (m) { m.textContent = msg; m.style.color = t.text; }
   ov.style.display = 'flex';
 }
 
@@ -511,6 +618,7 @@ function updateEpubProgress(pct) {
 
 function hideEpubLoading() {
   clearInterval(epubLoadTimer);
+  epubLoadTimer = null;
   const ov = document.getElementById('epub-loading-overlay');
   if (ov) ov.remove();
 }
@@ -520,10 +628,12 @@ async function loadEPUB(buf, fname, resumeCfi) {
   showScreen('screen-epub');
   applyEPUBThemeColors();
   showEpubLoading(EPUB_STEPS[0]);
+  updateEpubProgress(5);
 
+  // Fake progress ticker
   let fakePct = 10;
   epubLoadTimer = setInterval(() => {
-    fakePct = Math.min(fakePct + (fakePct < 60 ? 3 : fakePct < 85 ? 1.5 : 0.3), 92);
+    fakePct = Math.min(fakePct + (fakePct < 60 ? 3 : 1), 90);
     const si = fakePct < 35 ? 0 : fakePct < 60 ? 1 : fakePct < 82 ? 2 : 3;
     showEpubLoading(EPUB_STEPS[si]);
     updateEpubProgress(fakePct);
@@ -574,7 +684,7 @@ async function loadWithFoliate(buf, fname, resumeCfi) {
   foliateView.addEventListener('relocate', e => {
     const loc = e.detail;
     const pct = Math.round((loc?.fraction ?? 0) * 100);
-    document.getElementById('epub-scrubber').value    = pct;
+    document.getElementById('epub-scrubber').value      = pct;
     document.getElementById('epub-page-label').textContent = pct + '%';
     const cfi = loc?.cfi ?? null;
     saveHistory({ id: currentFileId, type: 'epub', title: fname, cfi, pct });
@@ -583,22 +693,40 @@ async function loadWithFoliate(buf, fname, resumeCfi) {
   await foliateView.open(file);
 }
 
+// ──────────────────────────────────────────────
+//  DIY EPUB loader (tanpa foliate-view)
+//  Fix: error handling yang lebih baik, inline style yang benar
+// ──────────────────────────────────────────────
 async function loadWithDIY(buf, fname, resumeCfi) {
+  updateEpubProgress(15);
+
   const zip = await parseZip(buf);
-  if (!zip) throw new Error('Gagal membaca ZIP EPUB');
+  if (!zip) throw new Error('Gagal membaca ZIP — file mungkin korup');
 
-  const containerXml  = await zip.readText('META-INF/container.xml');
-  const parser        = new DOMParser();
-  const containerDoc  = parser.parseFromString(containerXml, 'application/xml');
-  const rootfilePath  = containerDoc.querySelector('rootfile')?.getAttribute('full-path');
-  if (!rootfilePath) throw new Error('Tidak menemukan rootfile EPUB');
+  updateEpubProgress(25);
 
+  // Baca container.xml
+  const containerXml = await zip.readText('META-INF/container.xml');
+  if (!containerXml) throw new Error('META-INF/container.xml tidak ditemukan');
+
+  const parser = new DOMParser();
+  const containerDoc = parser.parseFromString(containerXml, 'application/xml');
+  const rootfilePath = containerDoc.querySelector('rootfile')?.getAttribute('full-path');
+  if (!rootfilePath) throw new Error('rootfile tidak ditemukan di container.xml');
+
+  updateEpubProgress(35);
+
+  // Base path untuk OPF
   const opfBase = rootfilePath.includes('/')
     ? rootfilePath.slice(0, rootfilePath.lastIndexOf('/') + 1)
     : '';
-  const opfText = await zip.readText(rootfilePath);
-  const opfDoc  = parser.parseFromString(opfText, 'application/xml');
 
+  const opfText = await zip.readText(rootfilePath);
+  if (!opfText) throw new Error('Gagal membaca OPF: ' + rootfilePath);
+
+  const opfDoc = parser.parseFromString(opfText, 'application/xml');
+
+  // Manifest
   const manifest = {};
   opfDoc.querySelectorAll('manifest item').forEach(it => {
     manifest[it.getAttribute('id')] = {
@@ -607,76 +735,149 @@ async function loadWithDIY(buf, fname, resumeCfi) {
     };
   });
 
+  // Spine
   const spineItems = [];
   opfDoc.querySelectorAll('spine itemref').forEach(ref => {
     const m = manifest[ref.getAttribute('idref')];
-    if (m && m.type === 'application/xhtml+xml') spineItems.push(m);
+    if (m && (m.type === 'application/xhtml+xml' || m.type === 'text/html')) {
+      spineItems.push(m);
+    }
   });
 
-  const t        = themes[epubTheme];
-  const viewer   = document.getElementById('epub-viewer');
+  if (!spineItems.length) throw new Error('Spine kosong — tidak ada halaman yang bisa dibaca');
+
+  updateEpubProgress(45);
+
+  const t      = themes[epubTheme];
+  const viewer = document.getElementById('epub-viewer');
   viewer.innerHTML = '';
 
+  // Container scroll
   const scroller = document.createElement('div');
+  scroller.id = 'epub-diy-scroller';
   Object.assign(scroller.style, {
-    width: '100%', height: '100%', overflowY: 'auto',
-    background: t.bg, color: t.text,
-    fontFamily: 'Georgia, serif', lineHeight: '1.7',
-    padding: '24px 20px', boxSizing: 'border-box',
+    width: '100%',
+    height: '100%',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    background: t.bg,
+    color: t.text,
+    fontFamily: 'Georgia, "Times New Roman", serif',
+    fontSize: epubFontSize + '%',
+    lineHeight: epubLH === 'normal' ? '1.75' : epubLH,
+    padding: '0',
+    boxSizing: 'border-box',
+    WebkitOverflowScrolling: 'touch',
   });
   viewer.appendChild(scroller);
 
+  // Render setiap chapter
   let loaded = 0;
   for (const item of spineItems) {
-    const text  = await zip.readText(item.href);
+    if (cancelLoad) return;
+
+    let text = null;
+    try {
+      text = await zip.readText(item.href);
+    } catch (e) {
+      console.warn('Skip chapter (gagal baca):', item.href, e);
+      continue;
+    }
+    if (!text) continue;
+
+    // Parse chapter
     const chDoc = parser.parseFromString(text, 'text/html');
 
-    // Apply base styles
-    const styleEl = chDoc.createElement('style');
-    styleEl.textContent = `body{background:${t.bg};color:${t.text};font-size:${epubFontSize}%;line-height:${epubLH === 'normal' ? '1.7' : epubLH}}`;
-    chDoc.head.appendChild(styleEl);
+    // Hapus script
+    chDoc.querySelectorAll('script, style').forEach(el => el.remove());
 
+    // Section pembungkus
     const section = document.createElement('div');
-    section.style.cssText = 'margin-bottom:40px;padding-bottom:40px;border-bottom:1px solid rgba(128,128,128,.2)';
-    section.innerHTML = chDoc.body.innerHTML;
+    Object.assign(section.style, {
+      maxWidth: '680px',
+      margin: '0 auto',
+      padding: '32px 20px 48px',
+      borderBottom: `1px solid ${t.text}22`,
+    });
 
-    // Resolve images
+    // Inline styling pada elemen
+    const styledBody = chDoc.body ? chDoc.body.innerHTML : text;
+    section.innerHTML = styledBody;
+
+    // Fix relative image src
+    const imgBase = item.href.includes('/')
+      ? item.href.slice(0, item.href.lastIndexOf('/') + 1)
+      : '';
+
     for (const img of section.querySelectorAll('img')) {
-      const src  = img.getAttribute('src');
-      if (!src || src.startsWith('data:') || src.startsWith('http')) continue;
-      const base    = item.href.includes('/') ? item.href.slice(0, item.href.lastIndexOf('/') + 1) : '';
-      const imgPath = (base + src).replace(/\/\.\.\//g, '/');
+      const src = img.getAttribute('src');
+      if (!src || src.startsWith('data:') || src.startsWith('http') || src.startsWith('blob:')) continue;
+      const cleanSrc = src.replace(/^(\.\/|\.\.\/)+/, '');
+      const imgPath  = imgBase + cleanSrc;
       try {
         const blob = await zip.readBlob(imgPath);
         if (blob) img.src = URL.createObjectURL(blob);
-      } catch (e) {}
+        else img.remove();
+      } catch (e) {
+        img.alt = '[Gambar]';
+      }
+    }
+
+    // Hapus link internal yang mungkin break layout
+    for (const a of section.querySelectorAll('a[href]')) {
+      const href = a.getAttribute('href');
+      if (!href.startsWith('http')) a.removeAttribute('href');
     }
 
     scroller.appendChild(section);
+
     loaded++;
-    updateEpubProgress(50 + Math.round(loaded / spineItems.length * 40));
+    updateEpubProgress(45 + Math.round(loaded / spineItems.length * 45));
+
+    // Yield setiap 3 chapter agar UI tidak freeze
+    if (loaded % 3 === 0) await tick();
   }
 
-  // DIY scroll navigation
-  const scrollPage = dir => scroller.scrollBy({ top: dir * scroller.clientHeight * 0.88, behavior: 'smooth' });
+  if (!scroller.children.length) throw new Error('Tidak ada konten yang berhasil dimuat');
 
-  document.getElementById('epub-next').onclick = () => scrollPage(1);
-  document.getElementById('epub-prev').onclick = () => scrollPage(-1);
+  updateEpubProgress(95);
+
+  // ── Navigasi DIY ──
+  const scrollPage = dir => {
+    scroller.scrollBy({ top: dir * scroller.clientHeight * 0.88, behavior: 'smooth' });
+  };
+
+  // Override nav buttons (remove foliate handlers jika ada)
+  const btnNext = document.getElementById('epub-next');
+  const btnPrev = document.getElementById('epub-prev');
+  const cloneAndReplace = btn => {
+    const clone = btn.cloneNode(true);
+    btn.parentNode.replaceChild(clone, btn);
+    return clone;
+  };
+  cloneAndReplace(btnNext).addEventListener('click', () => scrollPage(1));
+  cloneAndReplace(btnPrev).addEventListener('click', () => scrollPage(-1));
+
+  // Scrubber
+  const scrubber = document.getElementById('epub-scrubber');
+  scrubber.value = 0;
+  document.getElementById('epub-page-label').textContent = '0%';
 
   scroller.addEventListener('scroll', () => {
-    if (!scroller.scrollHeight) return;
-    const pct = Math.round(scroller.scrollTop / (scroller.scrollHeight - scroller.clientHeight) * 100);
-    document.getElementById('epub-scrubber').value    = pct;
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    if (!max) return;
+    const pct = Math.round(scroller.scrollTop / max * 100);
+    scrubber.value = pct;
     document.getElementById('epub-page-label').textContent = pct + '%';
     saveHistory({ id: currentFileId, type: 'epub', title: fname, cfi: null, pct });
   }, { passive: true });
 
-  document.getElementById('epub-scrubber').onchange = e => {
+  scrubber.addEventListener('change', e => {
     const pct = +e.target.value / 100;
     scroller.scrollTop = pct * (scroller.scrollHeight - scroller.clientHeight);
-  };
+  });
 
-  // Swipe support
+  // Swipe
   let ty = 0;
   viewer.addEventListener('touchstart', e => { ty = e.touches[0].clientY; }, { passive: true });
   viewer.addEventListener('touchend', e => {
@@ -684,13 +885,29 @@ async function loadWithDIY(buf, fname, resumeCfi) {
     if (Math.abs(dy) > 60) scrollPage(dy < 0 ? 1 : -1);
   }, { passive: true });
 
-  // Resume scroll position
-  if (resumeCfi && typeof resumeCfi === 'number') {
-    scroller.scrollTop = resumeCfi / 100 * (scroller.scrollHeight - scroller.clientHeight);
+  // Resume posisi
+  if (typeof resumeCfi === 'number' && resumeCfi > 0) {
+    setTimeout(() => {
+      scroller.scrollTop = (resumeCfi / 100) * (scroller.scrollHeight - scroller.clientHeight);
+    }, 100);
   }
+
+  // Apply tema ke scroller
+  applyDIYTheme = () => {
+    const th = themes[epubTheme];
+    scroller.style.background = th.bg;
+    scroller.style.color      = th.text;
+    scroller.style.fontSize   = epubFontSize + '%';
+    scroller.style.lineHeight = epubLH === 'normal' ? '1.75' : epubLH;
+  };
 }
 
-// ── ZIP Parser (native DecompressionStream, Chrome 80+) ──
+// Referensi fungsi apply tema DIY (diset saat loadWithDIY dipanggil)
+let applyDIYTheme = null;
+
+// ──────────────────────────────────────────────
+//  ZIP Parser (native DecompressionStream)
+// ──────────────────────────────────────────────
 async function parseZip(buf) {
   try {
     const view  = new DataView(buf);
@@ -703,20 +920,20 @@ async function parseZip(buf) {
     }
     if (eocdOffset < 0) return null;
 
-    let pos       = view.getUint32(eocdOffset + 16, true);
-    const count   = view.getUint16(eocdOffset + 8, true);
+    let pos     = view.getUint32(eocdOffset + 16, true);
+    const count = view.getUint16(eocdOffset + 8, true);
 
     for (let i = 0; i < count; i++) {
       if (view.getUint32(pos, true) !== 0x02014b50) break;
-      const method    = view.getUint16(pos + 10, true);
-      const compSize  = view.getUint32(pos + 20, true);
+      const method     = view.getUint16(pos + 10, true);
+      const compSize   = view.getUint32(pos + 20, true);
       const uncompSize = view.getUint32(pos + 24, true);
-      const fnLen     = view.getUint16(pos + 28, true);
-      const exLen     = view.getUint16(pos + 30, true);
-      const cmLen     = view.getUint16(pos + 32, true);
-      const localOff  = view.getUint32(pos + 42, true);
-      const name      = td.decode(new Uint8Array(buf, pos + 46, fnLen));
-      files[name]     = { method, compSize, uncompSize, localOff };
+      const fnLen      = view.getUint16(pos + 28, true);
+      const exLen      = view.getUint16(pos + 30, true);
+      const cmLen      = view.getUint16(pos + 32, true);
+      const localOff   = view.getUint32(pos + 42, true);
+      const name       = td.decode(new Uint8Array(buf, pos + 46, fnLen));
+      files[name]      = { method, compSize, uncompSize, localOff };
       pos += 46 + fnLen + exLen + cmLen;
     }
 
@@ -730,32 +947,53 @@ async function parseZip(buf) {
 
       if (e.method === 0) return data;
       if (e.method === 8) {
-        const ds = new DecompressionStream('deflate-raw');
-        const w  = ds.writable.getWriter();
-        w.write(data);
-        w.close();
-        const chunks = [];
-        const r = ds.readable.getReader();
-        while (true) {
-          const { done, value } = await r.read();
-          if (done) break;
-          chunks.push(value);
+        try {
+          const ds = new DecompressionStream('deflate-raw');
+          const w  = ds.writable.getWriter();
+          w.write(data);
+          w.close();
+          const chunks = [];
+          const r = ds.readable.getReader();
+          while (true) {
+            const { done, value } = await r.read();
+            if (done) break;
+            chunks.push(value);
+          }
+          const out = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
+          let off = 0;
+          for (const c of chunks) { out.set(c, off); off += c.length; }
+          return out;
+        } catch (e) {
+          console.warn('DecompressionStream gagal:', e);
+          return null;
         }
-        const out = new Uint8Array(chunks.reduce((a, c) => a + c.length, 0));
-        let off = 0;
-        for (const c of chunks) { out.set(c, off); off += c.length; }
-        return out;
       }
       return null;
     };
 
     return {
       readText: async n => {
-        const d = await getBytes(n);
+        // Coba path langsung dulu, lalu coba variasi
+        let d = await getBytes(n);
+        if (!d) {
+          // Coba tanpa leading slash
+          d = await getBytes(n.replace(/^\//, ''));
+        }
+        if (!d) {
+          // Coba cari case-insensitive
+          const lower = n.toLowerCase();
+          const key = Object.keys(files).find(k => k.toLowerCase() === lower);
+          if (key) d = await getBytes(key);
+        }
         return d ? new TextDecoder().decode(d) : null;
       },
       readBlob: async n => {
-        const d = await getBytes(n);
+        let d = await getBytes(n);
+        if (!d) {
+          const lower = n.toLowerCase();
+          const key = Object.keys(files).find(k => k.toLowerCase() === lower);
+          if (key) d = await getBytes(key);
+        }
         if (!d) return null;
         const ext  = n.split('.').pop().toLowerCase();
         const mime = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
@@ -771,7 +1009,7 @@ async function parseZip(buf) {
   }
 }
 
-// ── Foliate-js settings ──
+// ── Foliate settings ──
 function applyFoliateSettings() {
   if (!foliateView) return;
   const t = themes[epubTheme];
@@ -791,7 +1029,6 @@ function applyFoliateSettings() {
 document.getElementById('epub-next').addEventListener('click', () => {
   if (foliateView) foliateView.goRight();
 });
-
 document.getElementById('epub-prev').addEventListener('click', () => {
   if (foliateView) foliateView.goLeft();
 });
@@ -807,7 +1044,6 @@ let etx = 0;
 document.getElementById('epub-area').addEventListener('touchstart', e => {
   etx = e.touches[0].clientX;
 }, { passive: true });
-
 document.getElementById('epub-area').addEventListener('touchend', e => {
   const dx = e.changedTouches[0].clientX - etx;
   if (Math.abs(dx) > 50 && foliateView) {
@@ -815,13 +1051,15 @@ document.getElementById('epub-area').addEventListener('touchend', e => {
   }
 }, { passive: true });
 
-// ── Back button ──
+// ── Back ──
 document.getElementById('epub-back').addEventListener('click', () => {
-  // Memory cleanup
+  cancelLoad = true;
+  hideEpubLoading();
   if (foliateView) {
     try { foliateView.remove(); } catch (e) {}
     foliateView = null;
   }
+  applyDIYTheme = null;
   document.getElementById('epub-viewer').innerHTML = '';
   fileInput.value = '';
   renderHistory();
@@ -833,6 +1071,7 @@ document.getElementById('btn-epub-settings').addEventListener('click', e => {
   e.stopPropagation();
   settingsOpen = !settingsOpen;
   document.getElementById('epub-settings').style.display = settingsOpen ? 'block' : 'none';
+  document.getElementById('btn-epub-settings').setAttribute('aria-expanded', settingsOpen);
 });
 
 document.addEventListener('click', e => {
@@ -847,25 +1086,31 @@ document.addEventListener('click', e => {
 document.getElementById('font-sm').addEventListener('click', () => {
   epubFontSize = Math.max(70, epubFontSize - 10);
   applyFoliateSettings();
+  if (applyDIYTheme) applyDIYTheme();
 });
-
 document.getElementById('font-lg').addEventListener('click', () => {
   epubFontSize = Math.min(180, epubFontSize + 10);
   applyFoliateSettings();
+  if (applyDIYTheme) applyDIYTheme();
 });
 
 document.getElementById('lh-normal').addEventListener('click', () => {
   epubLH = 'normal';
   document.getElementById('lh-normal').classList.add('on');
   document.getElementById('lh-wide').classList.remove('on');
+  document.getElementById('lh-normal').setAttribute('aria-pressed', 'true');
+  document.getElementById('lh-wide').setAttribute('aria-pressed', 'false');
   applyFoliateSettings();
+  if (applyDIYTheme) applyDIYTheme();
 });
-
 document.getElementById('lh-wide').addEventListener('click', () => {
   epubLH = '1.9';
   document.getElementById('lh-wide').classList.add('on');
   document.getElementById('lh-normal').classList.remove('on');
+  document.getElementById('lh-wide').setAttribute('aria-pressed', 'true');
+  document.getElementById('lh-normal').setAttribute('aria-pressed', 'false');
   applyFoliateSettings();
+  if (applyDIYTheme) applyDIYTheme();
 });
 
 ['sepia', 'white', 'dark'].forEach(t => {
@@ -875,6 +1120,7 @@ document.getElementById('lh-wide').addEventListener('click', () => {
     document.getElementById('theme-' + t).classList.add('on');
     applyFoliateSettings();
     applyEPUBThemeColors();
+    if (applyDIYTheme) applyDIYTheme();
   });
 });
 
@@ -890,12 +1136,6 @@ function applyEPUBThemeColors() {
     b.style.color      = t.btnColor;
   });
   document.getElementById('epub-page-label').style.color = t.btnColor;
-  const ov = document.getElementById('epub-loading-overlay');
-  if (ov) {
-    ov.style.background = t.bg;
-    const m = document.getElementById('epub-load-msg');
-    if (m) m.style.color = t.text;
-  }
 }
 
 // ══════════════════════════════════════════════
@@ -932,7 +1172,6 @@ window.addEventListener('appinstalled', () => {
   toast('ReaderApp berhasil diinstall!');
 });
 
-// Register Service Worker
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js')
     .then(() => console.log('SW registered'))

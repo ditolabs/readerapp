@@ -1,4 +1,4 @@
-/* ===== RESET & VARIABEL ===== */
+kip/* ===== RESET & VARIABEL ===== */
 *,
 *::before,
 *::after {
@@ -691,4 +691,35 @@ body {
 #toast.show {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+/* ===== EFEK PAGE FLIP PDF ===== */
+.flip-next {
+  animation: pageFlipNext 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  transform-origin: right center;
+}
+.flip-prev {
+  animation: pageFlipPrev 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  transform-origin: left center;
+}
+
+@keyframes pageFlipNext {
+  0% { 
+    transform: perspective(1000px) rotateY(90deg); 
+    opacity: 0.2; 
+  }
+  100% { 
+    transform: perspective(1000px) rotateY(0deg); 
+    opacity: 1; 
+  }
+}
+
+@keyframes pageFlipPrev {
+  0% { 
+    transform: perspective(1000px) rotateY(-90deg); 
+    opacity: 0.2; 
+  }
+  100% { 
+    transform: perspective(1000px) rotateY(0deg); 
+    opacity: 1; 
+  }
 }

@@ -477,57 +477,63 @@
   }
 
 // ============================================================
-// 9. EPUB LOADER (menggunakan epub.js)
+// 9. EPUB LOADER (Diperbaiki)
 // ============================================================
 async function loadEpub(file) {
   showScreen('progress');
   dom.progNum.textContent = '0';
   dom.progFill.style.width = '0%';
   dom.progLabel.textContent = 'Memuat EPUB...';
-  dom.progSub.textContent = 'Mengurai dokumen';
+  dom.progSub.textContent = 'Mengekstrak dokumen...';
   state.cancelFlag = false;
+
+  // Beri waktu 100ms agar browser bisa merender UI Loading terlebih dahulu (mencegah freeze)
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   try {
     const arrayBuffer = await file.arrayBuffer();
-    const blob = new Blob([arrayBuffer], { type: 'application/epub+zip' });
-    const url = URL.createObjectURL(blob);
 
-    // Inisialisasi buku
-    const book = ePub(url);
+    // Buat simulasi loading karena epub.js tidak memiliki progress event yang detail
+    let simProgress = 0;
+    const simInterval = setInterval(() => {
+      if (simProgress < 90) {
+        simProgress += Math.floor(Math.random() * 10) + 5; // Naik acak 5-15%
+        if (simProgress > 90) simProgress = 90;
+        dom.progNum.textContent = simProgress;
+        dom.progFill.style.width = simProgress + '%';
+      }
+    }, 400);
+
+    // Langsung gunakan arrayBuffer (lebih efisien dan tidak rakus memori)
+    const book = ePub(arrayBuffer);
     state.epubBook = book;
 
-    // Progress load
     book.ready.then(() => {
+      clearInterval(simInterval);
       dom.progNum.textContent = '100';
       dom.progFill.style.width = '100%';
       dom.progSub.textContent = 'Siap dibaca';
       updateHistoryProgress(file.name, 100);
     });
 
-    // Tunggu hingga book siap
     await book.ready;
 
-    // Setup rendition
     const rendition = book.renderTo('epub-viewer', {
       width: '100%',
       height: '100%',
-      flow: 'paginated', // atau 'scrolled'
+      flow: 'paginated',
       spread: 'none',
       manager: 'default',
     });
     state.epubRendition = rendition;
 
-    // Tampilkan halaman pertama
     await rendition.display();
 
-    // Simpan info
     dom.epubTitle.textContent = file.name;
     dom.epubPageLabel.textContent = '1 / ' + (book.navigation ? book.navigation.length : '?');
-
-    // Set location awal
     state.epubCurrentLocation = rendition.currentLocation();
 
-    // Update scrubber & label saat lokasi berubah
+    // Event listener dll. tetap sama...
     rendition.on('relocated', (location) => {
       state.epubCurrentLocation = location;
       const total = book.navigation ? book.navigation.length : 1;
@@ -538,11 +544,9 @@ async function loadEpub(file) {
       updateHistoryProgress(file.name, progress);
     });
 
-    // Navigasi tombol
     dom.epubPrev.onclick = () => rendition.prev();
     dom.epubNext.onclick = () => rendition.next();
 
-    // Scrubber
     dom.epubScrubber.oninput = () => {
       const pct = parseFloat(dom.epubScrubber.value) / 100;
       const total = book.navigation ? book.navigation.length : 1;
@@ -553,14 +557,12 @@ async function loadEpub(file) {
       }
     };
 
-    // Tombol kembali
     dom.epubBack.onclick = () => {
       cleanupEpub();
       showScreen('home');
     };
 
-    // ===== PENGATURAN =====
-    // Font size
+    // Pengaturan Font & Tema
     dom.fontSm.onclick = () => {
       const current = rendition.themes.get('fontSize') || '1em';
       const size = parseFloat(current) - 0.1;
@@ -571,8 +573,6 @@ async function loadEpub(file) {
       const size = parseFloat(current) + 0.1;
       if (size < 2.5) rendition.themes.update({ fontSize: size + 'em' });
     };
-
-    // Tema
     dom.themeSepia.onclick = () => {
       rendition.themes.update({ background: '#faf6ef', color: '#3d2b1f' });
       setThemeActive('theme-sepia');
@@ -585,8 +585,6 @@ async function loadEpub(file) {
       rendition.themes.update({ background: '#1a1a2e', color: '#e0e0e0' });
       setThemeActive('theme-dark');
     };
-
-    // Line height
     dom.lhNormal.onclick = () => {
       rendition.themes.update({ lineHeight: '1.5' });
       setLhActive('lh-normal');
@@ -595,19 +593,12 @@ async function loadEpub(file) {
       rendition.themes.update({ lineHeight: '2' });
       setLhActive('lh-wide');
     };
-
-    // Settings toggle
     dom.btnEpubSettings.onclick = () => {
-      dom.epubSettings.style.display =
-        dom.epubSettings.style.display === 'block' ? 'none' : 'block';
+      dom.epubSettings.style.display = dom.epubSettings.style.display === 'block' ? 'none' : 'block';
     };
 
-    // Tampilkan layar EPUB
     showScreen('epub');
     state.isEpub = true;
-
-    // Bersihkan URL objek setelah digunakan
-    URL.revokeObjectURL(url);
 
   } catch (err) {
     console.error('EPUB Load Error:', err);

@@ -1,144 +1,134 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0d0d0d">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="ReaderApp">
-  <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css">
-  <title>ReaderApp</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ReaderApp" />
+    <link rel="manifest" href="manifest.json" />
+    <title>ReaderApp</title>
+
+    <!-- PDF.js via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js">
+    </script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
-  <!-- Toast Notification -->
-  <div id="toast"></div>
+    <!-- ===== HOME SCREEN ===== -->
+    <div id="screen-home" class="screen active" role="main" aria-label="Beranda">
+        <header class="home-header" role="banner">
+            <div class="home-logo">📚 <em>Reader</em>App</div>
+            <button class="btn-pwa" id="btn-install" aria-label="Install aplikasi">⬇ Install</button>
+        </header>
 
-  <!-- ========== HOME SCREEN ========== -->
-  <main id="screen-home" class="screen active">
-    <header class="home-header">
-      <div class="home-logo">📚 <em>Reader</em>App</div>
-      <button class="btn-pwa" id="btn-install" aria-label="Instal aplikasi">⬇ Install App</button>
-    </header>
+        <section class="home-body" aria-label="Pilih file atau lihat riwayat">
+            <div class="drop-zone" id="drop-zone" role="button" tabindex="0" aria-label="Seret atau klik untuk memilih file PDF atau EPUB">
+                <input type="file" id="file-input" accept=".pdf,.epub" aria-label="Pilih file PDF atau EPUB" />
+                <span class="dz-icon" aria-hidden="true">📖</span>
+                <h3>Buka PDF atau EPUB</h3>
+                <p>Seret file ke sini atau klik untuk memilih</p>
+                <div class="badge-row">
+                    <span class="badge badge-pdf">PDF</span>
+                    <span class="badge badge-epub">EPUB</span>
+                </div>
+            </div>
 
-    <section class="home-body">
-      <!-- Drop Zone -->
-      <div class="drop-zone" id="drop-zone">
-        <input type="file" id="file-input" accept=".pdf,.epub" aria-label="Pilih file PDF atau EPUB">
-        <span class="dz-icon">📖</span>
-        <h3>Buka PDF atau EPUB</h3>
-        <p>Seret file ke sini atau klik untuk memilih</p>
-        <div class="badge-row">
-          <span class="badge badge-pdf">PDF</span>
-          <span class="badge badge-epub">EPUB</span>
-        </div>
-      </div>
-
-      <!-- History -->
-      <section>
-        <div class="section-head">
-          <h2 class="section-title">Terakhir Dibaca</h2>
-          <button class="btn-clear-hist" id="btn-clear-all" aria-label="Hapus semua riwayat">Hapus Semua</button>
-        </div>
-        <div id="history-list"></div>
-      </section>
-    </section>
-  </main>
-
-  <!-- ========== PROGRESS SCREEN ========== -->
-  <section id="screen-progress" class="screen">
-    <div class="prog-num" id="prog-num">0</div>
-    <div class="prog-label" id="prog-label">Memproses…</div>
-    <div class="prog-sub" id="prog-sub">Mohon tunggu</div>
-    <div class="prog-bar-bg"><div class="prog-bar-fill" id="prog-fill"></div></div>
-    <button class="btn-cancel-prog" id="btn-cancel" aria-label="Batalkan pemrosesan">Batal</button>
-  </section>
-
-  <!-- ========== PDF READER ========== -->
-  <section id="screen-pdf" class="screen">
-    <!-- Tombol kembali (selalu terlihat) -->
-    <div style="position:absolute;top:10px;left:10px;z-index:200;">
-      <button class="btn-icon" id="pdf-back" aria-label="Kembali ke beranda" style="background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);">←</button>
+            <section aria-label="Riwayat bacaan">
+                <div class="section-head">
+                    <div class="section-title">Terakhir Dibaca</div>
+                    <button class="btn-clear-hist" id="btn-clear-all" aria-label="Hapus semua riwayat">Hapus Semua</button>
+                </div>
+                <div id="history-list" role="list" aria-label="Daftar file yang pernah dibuka"></div>
+            </section>
+        </section>
     </div>
 
-    <!-- Top bar (auto-hide) -->
-    <div class="top-bar" id="pdf-topbar" style="padding-left:58px;">
-      <div class="top-title" id="pdf-title">—</div>
-      <div class="top-page" id="pdf-top-page">1/1</div>
-    </div>
-
-    <!-- Canvas container -->
-    <div id="pdf-stage"><div id="pdf-book"></div></div>
-
-    <!-- Bottom bar (auto-hide) -->
-    <div class="bottom-bar" id="pdf-bottombar">
-      <div id="pdf-thumbs"></div>
-      <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0" aria-label="Navigasi halaman">
-      <div class="nav-row">
-        <button class="btn-nav" id="pdf-first" aria-label="Halaman pertama">⏮</button>
-        <button class="btn-nav" id="pdf-prev" aria-label="Halaman sebelumnya">‹</button>
-        <div class="page-label" id="pdf-page-label">Hal <strong>1</strong>/1</div>
-        <button class="btn-nav" id="pdf-next" aria-label="Halaman berikutnya">›</button>
-        <button class="btn-nav" id="pdf-last" aria-label="Halaman terakhir">⏭</button>
-        <button class="btn-nav" id="pdf-zoom-in" aria-label="Perbesar">＋</button>
-        <button class="btn-nav" id="pdf-zoom-out" aria-label="Perkecil">－</button>
-        <button class="btn-nav" id="pdf-bookmark" aria-label="Tandai halaman ini">★</button>
-      </div>
-    </div>
-  </section>
-
-  <!-- ========== EPUB READER ========== -->
-  <section id="screen-epub" class="screen">
-    <div id="epub-top">
-      <button class="epub-btn" id="epub-back" aria-label="Kembali ke beranda">← Kembali</button>
-      <div id="epub-title-bar">—</div>
-      <button class="epub-btn" id="btn-epub-settings" aria-label="Pengaturan tampilan">⚙</button>
-      <div id="epub-settings">
-        <div class="setting-row">
-          <span class="setting-label">Font</span>
-          <div class="setting-btns">
-            <button class="setting-btn" id="font-sm" aria-label="Perkecil font">A-</button>
-            <button class="setting-btn" id="font-lg" aria-label="Perbesar font">A+</button>
-          </div>
+    <!-- ===== PROGRESS SCREEN ===== -->
+    <div id="screen-progress" class="screen" role="dialog" aria-label="Memuat file">
+        <div class="prog-num" id="prog-num" aria-live="polite">0</div>
+        <div class="prog-label" id="prog-label">Memproses…</div>
+        <div class="prog-sub" id="prog-sub">Mohon tunggu</div>
+        <div class="prog-bar-bg">
+            <div class="prog-bar-fill" id="prog-fill" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
         </div>
-        <div class="setting-row">
-          <span class="setting-label">Tema</span>
-          <div class="setting-btns">
-            <button class="theme-btn on" id="theme-sepia" style="background:#faf6ef;border-color:#c8a96e" aria-label="Tema sepia"></button>
-            <button class="theme-btn" id="theme-white" style="background:#ffffff" aria-label="Tema putih"></button>
-            <button class="theme-btn" id="theme-dark" style="background:#1a1a2e" aria-label="Tema gelap"></button>
-          </div>
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Spasi</span>
-          <div class="setting-btns">
-            <button class="setting-btn on" id="lh-normal" aria-label="Spasi normal">Normal</button>
-            <button class="setting-btn" id="lh-wide" aria-label="Spasi lebar">Lebar</button>
-          </div>
-        </div>
-      </div>
+        <button class="btn-cancel-prog" id="btn-cancel" aria-label="Batalkan pemuatan">Batal</button>
     </div>
-    <div id="epub-area"><div id="epub-viewer"></div></div>
-    <div id="epub-bottom">
-      <input type="range" class="epub-scrubber" id="epub-scrubber" min="0" max="100" value="0" step="0.1" aria-label="Navigasi halaman">
-      <div class="epub-nav">
-        <button class="epub-nav-btn" id="epub-prev" aria-label="Halaman sebelumnya">‹</button>
-        <div class="epub-page-label" id="epub-page-label">—</div>
-        <button class="epub-nav-btn" id="epub-next" aria-label="Halaman berikutnya">›</button>
-        <button class="epub-nav-btn" id="epub-bookmark" aria-label="Tandai halaman ini">★</button>
-      </div>
-    </div>
-  </section>
 
-  <!-- ========== SCRIPTS ========== -->
-  <!-- PDF.js dari CDN -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- EPUB.js dari CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
-  <!-- Aplikasi Utama -->
-  <script src="app.js"></script>
+    <!-- ===== PDF READER ===== -->
+    <div id="screen-pdf" class="screen" role="main" aria-label="Pembaca PDF">
+        <div style="position:absolute;top:10px;left:10px;z-index:200;">
+            <button class="btn-icon" id="pdf-back" aria-label="Kembali ke beranda" style="background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);">←</button>
+        </div>
+        <div class="top-bar" id="pdf-topbar" style="padding-left:58px;">
+            <div class="top-title" id="pdf-title" aria-label="Judul dokumen">—</div>
+            <div class="top-page" id="pdf-top-page" aria-label="Nomor halaman">1/1</div>
+        </div>
+        <div id="pdf-stage" aria-label="Area tampilan halaman PDF"><div id="pdf-book"></div></div>
+        <div class="bottom-bar" id="pdf-bottombar">
+            <div id="pdf-thumbs" role="list" aria-label="Thumbnail halaman"></div>
+            <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0" aria-label="Gulir halaman" />
+            <div class="nav-row">
+                <button class="btn-nav" id="pdf-first" aria-label="Halaman pertama">⏮</button>
+                <button class="btn-nav" id="pdf-prev" aria-label="Halaman sebelumnya">‹</button>
+                <div class="page-label" id="pdf-page-label">Hal <strong>1</strong>/1</div>
+                <button class="btn-nav" id="pdf-next" aria-label="Halaman berikutnya">›</button>
+                <button class="btn-nav" id="pdf-last" aria-label="Halaman terakhir">⏭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== EPUB READER ===== -->
+    <div id="screen-epub" class="screen" role="main" aria-label="Pembaca EPUB">
+        <div id="epub-top">
+            <button class="epub-btn" id="epub-back" aria-label="Kembali ke beranda">← Kembali</button>
+            <div id="epub-title-bar" aria-label="Judul dokumen">—</div>
+            <button class="epub-btn" id="btn-epub-settings" aria-label="Pengaturan tampilan">⚙</button>
+            <div id="epub-settings" role="dialog" aria-label="Pengaturan tampilan EPUB">
+                <div class="setting-row">
+                    <span class="setting-label">Font</span>
+                    <div class="setting-btns">
+                        <button class="setting-btn" id="font-sm" aria-label="Perkecil ukuran font">A-</button>
+                        <button class="setting-btn" id="font-lg" aria-label="Perbesar ukuran font">A+</button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Tema</span>
+                    <div class="setting-btns">
+                        <button class="theme-btn on" id="theme-sepia" style="background:#faf6ef;border-color:#c8a96e" aria-label="Tema sepia"></button>
+                        <button class="theme-btn" id="theme-white" style="background:#ffffff" aria-label="Tema putih"></button>
+                        <button class="theme-btn" id="theme-dark" style="background:#1a1a2e" aria-label="Tema gelap"></button>
+                    </div>
+                </div>
+                <div class="setting-row">
+                    <span class="setting-label">Spasi</span>
+                    <div class="setting-btns">
+                        <button class="setting-btn on" id="lh-normal" aria-label="Spasi normal">Normal</button>
+                        <button class="setting-btn" id="lh-wide" aria-label="Spasi lebar">Lebar</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="epub-area"><div id="epub-viewer" aria-label="Area tampilan halaman EPUB"></div></div>
+        <div id="epub-bottom">
+            <input type="range" class="epub-scrubber" id="epub-scrubber" min="0" max="100" value="0" step="0.1" aria-label="Gulir halaman" />
+            <div class="epub-nav">
+                <button class="epub-nav-btn" id="epub-prev" aria-label="Halaman sebelumnya">‹</button>
+                <div class="epub-page-label" id="epub-page-label" aria-label="Informasi halaman">—</div>
+                <button class="epub-nav-btn" id="epub-next" aria-label="Halaman berikutnya">›</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== TOAST ===== -->
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <!-- ===== APP SCRIPT ===== -->
+    <script src="app.js"></script>
 </body>
 </html>

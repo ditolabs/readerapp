@@ -1,642 +1,672 @@
-// ============================
-// 1. Inisialisasi & Variabel Global
-// ============================
+/**
+ * ReaderApp — Aplikasi Pembaca PDF & EPUB
+ * Menggunakan PDF.js via CDN, pengelolaan memori otomatis
+ */
 
-// Konfigurasi PDF.js worker dari CDN
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+(function () {
+  'use strict';
 
-let currentFile = null;          // File object
-let currentFileType = null;     // 'pdf' or 'epub'
-let pdfDoc = null;
-let epubBook = null;
-let currentPage = 1;
-let totalPages = 1;
-let scale = 1.0;
-let bookmarkList = [];          // array of {fileName, page, label, timestamp}
-let history = [];              // array of {fileName, type, page, timestamp}
-let isProgressCanceled = false;
+  // ============================================================
+  // 1. REFERENSI DOM
+  // ============================================================
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
 
-// DOM refs
-const screenHome = document.getElementById('screen-home');
-const screenProgress = document.getElementById('screen-progress');
-const screenPdf = document.getElementById('screen-pdf');
-const screenEpub = document.getElementById('screen-epub');
-const fileInput = document.getElementById('file-input');
-const dropZone = document.getElementById('drop-zone');
-const historyList = document.getElementById('history-list');
-const toast = document.getElementById('toast');
+  const screens = {
+    home: $('#screen-home'),
+    progress: $('#screen-progress'),
+    pdf: $('#screen-pdf'),
+    epub: $('#screen-epub'),
+  };
 
-// ============================
-// 2. Utility Functions
-// ============================
+  const dom = {
+    fileInput: $('#file-input'),
+    dropZone: $('#drop-zone'),
+    historyList: $('#history-list'),
+    btnClearAll: $('#btn-clear-all'),
+    btnInstall: $('#btn-install'),
 
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
+    // Progress
+    progNum: $('#prog-num'),
+    progLabel: $('#prog-label'),
+    progSub: $('#prog-sub'),
+    progFill: $('#prog-fill'),
+    btnCancel: $('#btn-cancel'),
 
-function showToast(msg, duration = 2000) {
-  toast.textContent = msg;
-  toast.classList.add('show');
-  clearTimeout(toast._hideTimer);
-  toast._hideTimer = setTimeout(() => toast.classList.remove('show'), duration);
-}
+    // PDF
+    pdfBack: $('#pdf-back'),
+    pdfTitle: $('#pdf-title'),
+    pdfTopPage: $('#pdf-top-page'),
+    pdfBook: $('#pdf-book'),
+    pdfThumbs: $('#pdf-thumbs'),
+    pdfScrubber: $('#pdf-scrubber'),
+    pdfPageLabel: $('#pdf-page-label'),
+    pdfFirst: $('#pdf-first'),
+    pdfPrev: $('#pdf-prev'),
+    pdfNext: $('#pdf-next'),
+    pdfLast: $('#pdf-last'),
+    pdfTopbar: $('#pdf-topbar'),
+    pdfBottombar: $('#pdf-bottombar'),
 
-function getFileExtension(name) {
-  return name.split('.').pop().toLowerCase();
-}
+    // EPUB
+    epubBack: $('#epub-back'),
+    epubTitle: $('#epub-title-bar'),
+    epubViewer: $('#epub-viewer'),
+    epubScrubber: $('#epub-scrubber'),
+    epubPageLabel: $('#epub-page-label'),
+    epubPrev: $('#epub-prev'),
+    epubNext: $('#epub-next'),
+    epubSettings: $('#epub-settings'),
+    btnEpubSettings: $('#btn-epub-settings'),
+    fontSm: $('#font-sm'),
+    fontLg: $('#font-lg'),
+    themeSepia: $('#theme-sepia'),
+    themeWhite: $('#theme-white'),
+    themeDark: $('#theme-dark'),
+    lhNormal: $('#lh-normal'),
+    lhWide: $('#lh-wide'),
 
-function formatDate(ts) {
-  return new Date(ts).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' });
-}
+    toast: $('#toast'),
+  };
 
-// ============================
-// 3. Manajemen Riwayat (History)
-// ============================
+  // ============================================================
+  // 2. STATE
+  // ============================================================
+  const state = {
+    currentFile: null, // { name, data, type, size }
+    pdfDoc: null,
+    pdfPageCount: 0,
+    pdfCurrentPage: 1,
+    pdfScale: 1.2,
+    pdfRenderTask: null,
+    epubBook: null,
+    epubCurrentLocation: null,
+    epubRendition: null,
+    isPdf: false,
+    isEpub: false,
+    cancelFlag: false,
+    history: [],
+  };
 
-function loadHistory() {
-  try {
-    const data = localStorage.getItem('readerapp_history');
-    history = data ? JSON.parse(data) : [];
-  } catch {
-    history = [];
-  }
-  renderHistory();
-}
-
-function saveHistory() {
-  localStorage.setItem('readerapp_history', JSON.stringify(history));
-  renderHistory();
-}
-
-function addHistory(fileName, type, page) {
-  // Hapus entri duplikat jika sudah ada
-  history = history.filter(item => item.fileName !== fileName);
-  history.unshift({ fileName, type, page, timestamp: Date.now() });
-  // Batasi jumlah riwayat (misal 50)
-  if (history.length > 50) history.pop();
-  saveHistory();
-}
-
-function renderHistory() {
-  if (history.length === 0) {
-    historyList.innerHTML = `<div class="hist-empty">Belum ada buku yang dibaca</div>`;
-    return;
-  }
-  let html = '';
-  history.forEach((item, index) => {
-    const typeClass = item.type === 'pdf' ? 'hist-type-pdf' : 'hist-type-epub';
-    const icon = item.type === 'pdf' ? '📄' : '📘';
-    const progClass = item.type === 'pdf' ? 'hist-prog-pdf' : 'hist-prog-epub';
-    html += `
-      <div class="hist-card" data-index="${index}">
-        <div class="hist-type ${typeClass}">${icon}</div>
-        <div class="hist-info">
-          <div class="hist-title">${escapeHtml(item.fileName)}</div>
-          <div class="hist-meta">Halaman ${item.page} • ${formatDate(item.timestamp)}</div>
-        </div>
-        <button class="hist-btn-del" data-index="${index}" aria-label="Hapus riwayat">✕</button>
-        <div class="hist-arrow">›</div>
-      </div>
-    `;
-  });
-  historyList.innerHTML = html;
-
-  // Event listener untuk membuka riwayat
-  historyList.querySelectorAll('.hist-card').forEach(card => {
-    card.addEventListener('click', function(e) {
-      if (e.target.closest('.hist-btn-del')) return;
-      const idx = parseInt(this.dataset.index);
-      const item = history[idx];
-      if (item) openHistoryItem(item);
+  // ============================================================
+  // 3. UTILITY
+  // ============================================================
+  function showScreen(name) {
+    Object.keys(screens).forEach((key) => {
+      screens[key].classList.toggle('active', key === name);
     });
-  });
+  }
 
-  // Event listener untuk tombol hapus
-  historyList.querySelectorAll('.hist-btn-del').forEach(btn => {
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      const idx = parseInt(this.dataset.index);
-      history.splice(idx, 1);
-      saveHistory();
+  function showToast(msg, duration = 2500) {
+    const t = dom.toast;
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._hide);
+    t._hide = setTimeout(() => t.classList.remove('show'), duration);
+  }
+
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  function getFileExtension(name) {
+    const i = name.lastIndexOf('.');
+    return i > 0 ? name.slice(i + 1).toLowerCase() : '';
+  }
+
+  // ============================================================
+  // 4. HISTORY (localStorage)
+  // ============================================================
+  function loadHistory() {
+    try {
+      const raw = localStorage.getItem('readerapp_history');
+      state.history = raw ? JSON.parse(raw) : [];
+    } catch {
+      state.history = [];
+    }
+    renderHistory();
+  }
+
+  function saveHistory() {
+    try {
+      localStorage.setItem('readerapp_history', JSON.stringify(state.history));
+    } catch (e) { /* ignore */ }
+    renderHistory();
+  }
+
+  function addHistory(file) {
+    // Hapus duplikat berdasarkan nama & ukuran
+    state.history = state.history.filter(
+      (h) => !(h.name === file.name && h.size === file.size)
+    );
+    state.history.unshift({
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      date: new Date().toISOString(),
+      progress: 0,
     });
-  });
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-// ============================
-// 4. Manajemen Bookmark
-// ============================
-
-function loadBookmarks() {
-  try {
-    const data = localStorage.getItem('readerapp_bookmarks');
-    bookmarkList = data ? JSON.parse(data) : [];
-  } catch {
-    bookmarkList = [];
-  }
-}
-
-function saveBookmarks() {
-  localStorage.setItem('readerapp_bookmarks', JSON.stringify(bookmarkList));
-}
-
-function addBookmark(fileName, page, label = '') {
-  // Cek apakah sudah ada bookmark untuk halaman ini
-  const existing = bookmarkList.findIndex(b => b.fileName === fileName && b.page === page);
-  if (existing !== -1) {
-    // Jika sudah ada, hapus (toggle)
-    bookmarkList.splice(existing, 1);
-    showToast('Bookmark dihapus');
-  } else {
-    bookmarkList.push({ fileName, page, label, timestamp: Date.now() });
-    showToast('Bookmark ditambahkan');
-  }
-  saveBookmarks();
-}
-
-function isBookmarked(fileName, page) {
-  return bookmarkList.some(b => b.fileName === fileName && b.page === page);
-}
-
-// ============================
-// 5. PDF Functions (dengan Zoom & Bookmark)
-// ============================
-
-let pdfRenderTask = null;
-let pdfCurrentPage = 1;
-
-function openPDF(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = async function(e) {
-      try {
-        const data = new Uint8Array(e.target.result);
-        pdfDoc = await pdfjsLib.getDocument({ data }).promise;
-        totalPages = pdfDoc.numPages;
-        currentPage = 1;
-        scale = 1.0;
-        currentFileType = 'pdf';
-        currentFile = file;
-        addHistory(file.name, 'pdf', 1);
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-async function renderPDFPage(pageNum) {
-  if (!pdfDoc) return;
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
-  const container = document.getElementById('pdf-book');
-  container.innerHTML = '';
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  canvas.height = viewport.height;
-  canvas.width = viewport.width;
-  container.appendChild(canvas);
-  const renderContext = { canvasContext: context, viewport };
-  if (pdfRenderTask) {
-    pdfRenderTask.cancel();
-  }
-  pdfRenderTask = page.render(renderContext);
-  await pdfRenderTask.promise;
-  pdfRenderTask = null;
-
-  // Update UI
-  document.getElementById('pdf-title').textContent = currentFile.name;
-  document.getElementById('pdf-top-page').textContent = `${pageNum}/${totalPages}`;
-  document.getElementById('pdf-page-label').innerHTML = `Hal <strong>${pageNum}</strong>/${totalPages}`;
-  document.getElementById('pdf-scrubber').value = pageNum;
-  document.getElementById('pdf-scrubber').max = totalPages;
-  document.getElementById('pdf-first').disabled = (pageNum === 1);
-  document.getElementById('pdf-prev').disabled = (pageNum === 1);
-  document.getElementById('pdf-next').disabled = (pageNum === totalPages);
-  document.getElementById('pdf-last').disabled = (pageNum === totalPages);
-
-  // Tampilkan status bookmark
-  const bookmarkBtn = document.getElementById('pdf-bookmark');
-  if (isBookmarked(currentFile.name, pageNum)) {
-    bookmarkBtn.textContent = '★';
-  } else {
-    bookmarkBtn.textContent = '☆';
-  }
-
-  // Generate thumbnails (sederhana: hanya generate ulang jika belum ada)
-  generateThumbnails();
-}
-
-async function generateThumbnails() {
-  const container = document.getElementById('pdf-thumbs');
-  container.innerHTML = '';
-  // Tampilkan maksimal 10 thumbnail (halaman pertama, terakhir, dan sekitar halaman aktif)
-  const pages = [];
-  const total = totalPages;
-  const current = currentPage;
-  if (total <= 10) {
-    for (let i = 1; i <= total; i++) pages.push(i);
-  } else {
-    pages.push(1);
-    for (let i = Math.max(2, current-3); i <= Math.min(total-1, current+3); i++) pages.push(i);
-    pages.push(total);
-  }
-  // Hapus duplikat dan urutkan
-  const unique = [...new Set(pages)].sort((a,b)=>a-b);
-
-  for (const p of unique) {
-    const page = await pdfDoc.getPage(p);
-    const viewport = page.getViewport({ scale: 0.2 });
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const thumb = document.createElement('div');
-    thumb.className = 'thumb' + (p === currentPage ? ' active' : '');
-    const img = document.createElement('img');
-    img.src = canvas.toDataURL();
-    thumb.appendChild(img);
-    thumb.addEventListener('click', () => {
-      goToPDFPage(p);
-    });
-    container.appendChild(thumb);
-  }
-}
-
-function goToPDFPage(pageNum) {
-  if (pageNum < 1 || pageNum > totalPages) return;
-  currentPage = pageNum;
-  renderPDFPage(pageNum);
-  // Update history page
-  const historyItem = history.find(h => h.fileName === currentFile.name);
-  if (historyItem) {
-    historyItem.page = pageNum;
+    if (state.history.length > 50) state.history.pop();
     saveHistory();
   }
-}
 
-// Navigasi PDF
-function pdfPrev() { if (currentPage > 1) goToPDFPage(currentPage - 1); }
-function pdfNext() { if (currentPage < totalPages) goToPDFPage(currentPage + 1); }
-function pdfFirst() { goToPDFPage(1); }
-function pdfLast() { goToPDFPage(totalPages); }
-function pdfZoomIn() { scale = Math.min(3.0, scale + 0.25); renderPDFPage(currentPage); }
-function pdfZoomOut() { scale = Math.max(0.5, scale - 0.25); renderPDFPage(currentPage); }
-function pdfToggleBookmark() {
-  if (!currentFile) return;
-  addBookmark(currentFile.name, currentPage);
-  // Update tombol
-  const btn = document.getElementById('pdf-bookmark');
-  if (isBookmarked(currentFile.name, currentPage)) {
-    btn.textContent = '★';
-  } else {
-    btn.textContent = '☆';
-  }
-}
-
-// ============================
-// 6. EPUB Functions (dengan Bookmark)
-// ============================
-
-let epubRendition = null;
-
-function openEPUB(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      try {
-        const blob = new Blob([e.target.result], { type: 'application/epub+zip' });
-        const url = URL.createObjectURL(blob);
-        epubBook = ePub(url);
-        epubBook.ready.then(() => {
-          totalPages = epubBook.settings.pageCount || 1; // perkiraan
-          currentPage = 1;
-          currentFileType = 'epub';
-          currentFile = file;
-          addHistory(file.name, 'epub', 1);
-          resolve();
-        }).catch(reject);
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = reject;
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function renderEPUBPage() {
-  if (!epubBook) return;
-  const container = document.getElementById('epub-viewer');
-  container.innerHTML = '';
-  if (!epubRendition) {
-    epubRendition = epubBook.renderTo(container, { width: '100%', height: '100%' });
-  }
-  // Tampilkan lokasi saat ini (gunakan lokasi tersimpan atau awal)
-  const location = epubRendition.currentLocation();
-  if (location && location.start) {
-    // sudah ada
-  } else {
-    epubRendition.display();
-  }
-  epubRendition.on('rendered', (section) => {
-    // Update page info
-    const currentLocation = epubRendition.currentLocation();
-    if (currentLocation) {
-      const cfi = currentLocation.start.cfi;
-      const page = Math.floor(currentLocation.start.index / 10) + 1; // perkiraan
-      document.getElementById('epub-page-label').textContent = `Halaman ${page}`;
-      // Update scrubber
-      const total = epubBook.settings.pageCount || 100;
-      const progress = (page / total) * 100;
-      document.getElementById('epub-scrubber').value = progress;
-      // Update bookmark status
-      const btn = document.getElementById('epub-bookmark');
-      if (isBookmarked(currentFile.name, page)) {
-        btn.textContent = '★';
-      } else {
-        btn.textContent = '☆';
-      }
-    }
-  });
-}
-
-function epubPrev() {
-  if (epubRendition) epubRendition.prev();
-}
-function epubNext() {
-  if (epubRendition) epubRendition.next();
-}
-function epubToggleBookmark() {
-  if (!currentFile || !epubRendition) return;
-  const loc = epubRendition.currentLocation();
-  if (!loc) return;
-  const page = Math.floor(loc.start.index / 10) + 1;
-  addBookmark(currentFile.name, page);
-  const btn = document.getElementById('epub-bookmark');
-  if (isBookmarked(currentFile.name, page)) {
-    btn.textContent = '★';
-  } else {
-    btn.textContent = '☆';
-  }
-}
-
-// ============================
-// 7. Pencarian Teks (PDF)
-// ============================
-
-async function searchPDF(query) {
-  if (!pdfDoc) return [];
-  const results = [];
-  for (let i = 1; i <= totalPages; i++) {
-    const page = await pdfDoc.getPage(i);
-    const textContent = await page.getTextContent();
-    const text = textContent.items.map(item => item.str).join(' ');
-    if (text.toLowerCase().includes(query.toLowerCase())) {
-      results.push({ page: i, preview: text.substring(0, 80) + '...' });
+  function updateHistoryProgress(name, progress) {
+    const item = state.history.find((h) => h.name === name);
+    if (item) {
+      item.progress = Math.min(100, Math.round(progress));
+      saveHistory();
     }
   }
-  return results;
-}
 
-// ============================
-// 8. Pencarian Teks (EPUB)
-// ============================
+  function renderHistory() {
+    const list = dom.historyList;
+    if (!state.history.length) {
+      list.innerHTML = `<div class="hist-empty">Belum ada file yang dibaca</div>`;
+      return;
+    }
+    list.innerHTML = state.history
+      .map(
+        (h, idx) => `
+        <div class="hist-card" data-idx="${idx}" role="listitem">
+          <div class="hist-type ${h.type === 'pdf' ? 'hist-type-pdf' : 'hist-type-epub'}">
+            ${h.type === 'pdf' ? '📄' : '📖'}
+          </div>
+          <div class="hist-info">
+            <div class="hist-title">${escapeHtml(h.name)}</div>
+            <div class="hist-meta">${formatFileSize(h.size)} • ${new Date(h.date).toLocaleDateString()}</div>
+            ${h.progress > 0 ? `<div class="hist-prog-bg"><div class="hist-prog-fill ${h.type === 'pdf' ? 'hist-prog-pdf' : 'hist-prog-epub'}" style="width:${h.progress}%"></div></div>` : ''}
+          </div>
+          <button class="hist-btn-del" data-idx="${idx}" aria-label="Hapus dari riwayat">✕</button>
+          <span class="hist-arrow">›</span>
+        </div>
+      `
+      )
+      .join('');
 
-async function searchEPUB(query) {
-  if (!epubBook) return [];
-  // EPUB.js tidak memiliki built-in search, kita bisa baca semua item
-  const results = [];
-  const items = await epubBook.locations.generate(1000); // atau menggunakan spine
-  // Pendekatan sederhana: baca semua section (spine)
-  const spine = epubBook.spine;
-  for (let i = 0; i < spine.length; i++) {
-    const item = spine[i];
-    try {
-      const data = await epubBook.get(item.href);
-      const text = data.textContent || data;
-      if (text.toLowerCase().includes(query.toLowerCase())) {
-        results.push({ page: i+1, preview: text.substring(0, 80) + '...' });
-      }
-    } catch(e) {}
+    // Event listener untuk klik card
+    list.querySelectorAll('.hist-card').forEach((card) => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.hist-btn-del')) return;
+        const idx = parseInt(card.dataset.idx, 10);
+        const item = state.history[idx];
+        if (item) openFileFromHistory(item);
+      });
+    });
+
+    // Event listener untuk tombol hapus
+    list.querySelectorAll('.hist-btn-del').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const idx = parseInt(btn.dataset.idx, 10);
+        state.history.splice(idx, 1);
+        saveHistory();
+      });
+    });
   }
-  return results;
-}
 
-// ============================
-// 9. Fungsi untuk Membuka File (dengan Progress)
-// ============================
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-async function openFile(file) {
-  try {
-    showScreen('screen-progress');
-    document.getElementById('prog-label').textContent = 'Memproses…';
-    document.getElementById('prog-sub').textContent = 'Mohon tunggu';
-    document.getElementById('prog-fill').style.width = '0%';
-    isProgressCanceled = false;
+  // ============================================================
+  // 5. OPEN FILE FROM HISTORY
+  // ============================================================
+  async function openFileFromHistory(item) {
+    // Coba baca ulang file dari localStorage? Tidak feasible untuk file besar.
+    // Kita hanya bisa membuka ulang jika file masih ada di memori atau kita simpan referensi.
+    // Untuk demo, kita tampilkan toast dan minta user memilih ulang.
+    showToast('Silakan pilih ulang file: ' + item.name);
+    // Trigger file input
+    dom.fileInput.click();
+  }
 
+  // ============================================================
+  // 6. FILE HANDLING
+  // ============================================================
+  function handleFile(file) {
+    if (!file) return;
     const ext = getFileExtension(file.name);
     if (ext === 'pdf') {
-      await openPDF(file);
-      showScreen('screen-pdf');
-      await renderPDFPage(1);
+      state.isPdf = true;
+      state.isEpub = false;
+      state.currentFile = file;
+      addHistory(file);
+      loadPdf(file);
     } else if (ext === 'epub') {
-      await openEPUB(file);
-      showScreen('screen-epub');
-      renderEPUBPage();
+      state.isPdf = false;
+      state.isEpub = true;
+      state.currentFile = file;
+      addHistory(file);
+      loadEpub(file);
     } else {
-      throw new Error('Format file tidak didukung');
+      showToast('Format tidak didukung. Gunakan PDF atau EPUB.');
     }
-  } catch (err) {
-    console.error(err);
-    showToast('Gagal membuka file: ' + err.message);
-    showScreen('screen-home');
   }
-}
 
-function openHistoryItem(item) {
-  // Kita hanya bisa membuka ulang dari file asli? Tidak, kita hanya simpan nama.
-  // Untuk demo, kita tampilkan pesan bahwa kita perlu memuat ulang file.
-  // Lebih baik kita simpan file di IndexedDB, tapi untuk sederhana kita minta user memilih ulang.
-  showToast(`Buka "${item.fileName}" secara manual dari perangkat Anda.`);
-  // Atau kita bisa mencoba membuka dari localStorage jika kita simpan data file.
-}
+  // ============================================================
+  // 7. PDF LOADER (menggunakan PDF.js dari CDN)
+  // ============================================================
+  async function loadPdf(file) {
+    showScreen('progress');
+    dom.progNum.textContent = '0';
+    dom.progFill.style.width = '0%';
+    dom.progLabel.textContent = 'Memuat PDF...';
+    dom.progSub.textContent = 'Mengurai dokumen';
+    state.cancelFlag = false;
 
-// ============================
-// 10. Event Listeners
-// ============================
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      loadingTask.onProgress = (progress) => {
+        if (state.cancelFlag) {
+          loadingTask.destroy();
+          return;
+        }
+        const pct = Math.round((progress.loaded / progress.total) * 100);
+        dom.progNum.textContent = pct;
+        dom.progFill.style.width = pct + '%';
+        dom.progSub.textContent = `Memuat halaman... ${pct}%`;
+        updateHistoryProgress(file.name, pct);
+      };
 
-// File input
-fileInput.addEventListener('change', function(e) {
-  if (this.files.length > 0) {
-    openFile(this.files[0]);
+      state.pdfDoc = await loadingTask.promise;
+      if (state.cancelFlag) {
+        state.pdfDoc.destroy();
+        showScreen('home');
+        return;
+      }
+
+      state.pdfPageCount = state.pdfDoc.numPages;
+      state.pdfCurrentPage = 1;
+      dom.progNum.textContent = '100';
+      dom.progFill.style.width = '100%';
+      dom.progSub.textContent = 'Siap dibaca';
+      updateHistoryProgress(file.name, 100);
+
+      // Setup PDF viewer
+      setupPdfViewer(file.name);
+      showScreen('pdf');
+      renderPdfPage(1);
+    } catch (err) {
+      console.error('PDF Load Error:', err);
+      showToast('Gagal memuat PDF: ' + err.message);
+      showScreen('home');
+    }
   }
-  this.value = ''; // reset
-});
 
-// Drop zone
-dropZone.addEventListener('dragover', function(e) {
-  e.preventDefault();
-  this.classList.add('over');
-});
-dropZone.addEventListener('dragleave', function(e) {
-  e.preventDefault();
-  this.classList.remove('over');
-});
-dropZone.addEventListener('drop', function(e) {
-  e.preventDefault();
-  this.classList.remove('over');
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    openFile(files[0]);
+  // ============================================================
+  // 8. PDF VIEWER
+  // ============================================================
+  function setupPdfViewer(filename) {
+    dom.pdfTitle.textContent = filename;
+    dom.pdfTopPage.textContent = `1/${state.pdfPageCount}`;
+    dom.pdfPageLabel.innerHTML = `Hal <strong>1</strong>/${state.pdfPageCount}`;
+    dom.pdfScrubber.max = state.pdfPageCount - 1;
+    dom.pdfScrubber.value = 0;
+    dom.pdfFirst.disabled = true;
+    dom.pdfPrev.disabled = true;
+
+    // Render thumbnails
+    renderPdfThumbs();
+
+    // Event listeners
+    dom.pdfBack.onclick = () => {
+      cleanupPdf();
+      showScreen('home');
+    };
+
+    dom.pdfScrubber.oninput = () => {
+      const page = Math.floor(parseFloat(dom.pdfScrubber.value)) + 1;
+      goToPdfPage(page);
+    };
+
+    dom.pdfFirst.onclick = () => goToPdfPage(1);
+    dom.pdfPrev.onclick = () => goToPdfPage(state.pdfCurrentPage - 1);
+    dom.pdfNext.onclick = () => goToPdfPage(state.pdfCurrentPage + 1);
+    dom.pdfLast.onclick = () => goToPdfPage(state.pdfPageCount);
+
+    // Keyboard navigation
+    document.addEventListener('keydown', pdfKeyHandler);
+
+    // Auto-hide bars on idle
+    let hideTimer;
+    const resetHideTimer = () => {
+      clearTimeout(hideTimer);
+      dom.pdfTopbar.classList.remove('hide');
+      dom.pdfBottombar.classList.remove('hide');
+      hideTimer = setTimeout(() => {
+        dom.pdfTopbar.classList.add('hide');
+        dom.pdfBottombar.classList.add('hide');
+      }, 3000);
+    };
+    dom.pdfBook.addEventListener('click', resetHideTimer);
+    dom.pdfBook.addEventListener('mousemove', resetHideTimer);
+    resetHideTimer();
   }
-});
 
-// Tombol batal proses
-document.getElementById('btn-cancel').addEventListener('click', function() {
-  isProgressCanceled = true;
-  showScreen('screen-home');
-  showToast('Pemrosesan dibatalkan');
-});
-
-// Tombol kembali PDF
-document.getElementById('pdf-back').addEventListener('click', function() {
-  // Cleanup
-  if (pdfRenderTask) {
-    pdfRenderTask.cancel();
-    pdfRenderTask = null;
+  function pdfKeyHandler(e) {
+    if (!screens.pdf.classList.contains('active')) return;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      goToPdfPage(state.pdfCurrentPage - 1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      goToPdfPage(state.pdfCurrentPage + 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      goToPdfPage(1);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      goToPdfPage(state.pdfPageCount);
+    }
   }
-  pdfDoc = null;
-  currentFile = null;
-  showScreen('screen-home');
-});
 
-// Navigasi PDF
-document.getElementById('pdf-first').addEventListener('click', pdfFirst);
-document.getElementById('pdf-prev').addEventListener('click', pdfPrev);
-document.getElementById('pdf-next').addEventListener('click', pdfNext);
-document.getElementById('pdf-last').addEventListener('click', pdfLast);
-document.getElementById('pdf-zoom-in').addEventListener('click', pdfZoomIn);
-document.getElementById('pdf-zoom-out').addEventListener('click', pdfZoomOut);
-document.getElementById('pdf-bookmark').addEventListener('click', pdfToggleBookmark);
-document.getElementById('pdf-scrubber').addEventListener('input', function() {
-  const val = parseInt(this.value);
-  if (!isNaN(val) && val >=1 && val <= totalPages) {
-    goToPDFPage(val);
+  function goToPdfPage(page) {
+    if (page < 1 || page > state.pdfPageCount) return;
+    state.pdfCurrentPage = page;
+    renderPdfPage(page);
+    dom.pdfScrubber.value = page - 1;
+    dom.pdfTopPage.textContent = `${page}/${state.pdfPageCount}`;
+    dom.pdfPageLabel.innerHTML = `Hal <strong>${page}</strong>/${state.pdfPageCount}`;
+    dom.pdfFirst.disabled = page <= 1;
+    dom.pdfPrev.disabled = page <= 1;
+    dom.pdfNext.disabled = page >= state.pdfPageCount;
+    dom.pdfLast.disabled = page >= state.pdfPageCount;
+
+    // Highlight thumbnail
+    dom.pdfThumbs.querySelectorAll('.thumb').forEach((el, idx) => {
+      el.classList.toggle('active', idx === page - 1);
+    });
+    // Scroll thumbnail into view
+    const thumb = dom.pdfThumbs.querySelector(`.thumb[data-page="${page}"]`);
+    if (thumb) thumb.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }
-});
 
-// Tombol kembali EPUB
-document.getElementById('epub-back').addEventListener('click', function() {
-  if (epubRendition) {
-    epubRendition.destroy();
-    epubRendition = null;
+  async function renderPdfPage(page) {
+    if (!state.pdfDoc) return;
+    try {
+      if (state.pdfRenderTask) {
+        state.pdfRenderTask.cancel();
+        state.pdfRenderTask = null;
+      }
+      const scale = state.pdfScale;
+      const viewport = state.pdfDoc.getPage(page).then((p) => p.getViewport({ scale }));
+      const pageObj = await state.pdfDoc.getPage(page);
+      const vp = pageObj.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width;
+      canvas.height = vp.height;
+      canvas.style.width = '100%';
+      canvas.style.height = 'auto';
+      canvas.style.maxWidth = '100%';
+      canvas.style.maxHeight = '90vh';
+      canvas.style.objectFit = 'contain';
+
+      const ctx = canvas.getContext('2d');
+      const renderTask = pageObj.render({
+        canvasContext: ctx,
+        viewport: vp,
+      });
+      state.pdfRenderTask = renderTask;
+      await renderTask.promise;
+      state.pdfRenderTask = null;
+
+      // Replace content
+      dom.pdfBook.innerHTML = '';
+      dom.pdfBook.appendChild(canvas);
+    } catch (err) {
+      if (err.name === 'RenderingCancelledException') {
+        // Diabaikan
+      } else {
+        console.error('Render page error:', err);
+        showToast('Gagal render halaman');
+      }
+    }
   }
-  epubBook = null;
-  currentFile = null;
-  showScreen('screen-home');
-});
 
-// Navigasi EPUB
-document.getElementById('epub-prev').addEventListener('click', epubPrev);
-document.getElementById('epub-next').addEventListener('click', epubNext);
-document.getElementById('epub-bookmark').addEventListener('click', epubToggleBookmark);
-document.getElementById('epub-scrubber').addEventListener('input', function() {
-  // Perkiraan navigasi berdasarkan persentase (tidak presisi)
-  const percent = parseFloat(this.value) / 100;
-  if (epubRendition) {
-    epubRendition.display(percent);
+  async function renderPdfThumbs() {
+    const container = dom.pdfThumbs;
+    container.innerHTML = '';
+    const count = Math.min(state.pdfPageCount, 20); // Batas thumbnail
+    for (let i = 1; i <= count; i++) {
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb' + (i === 1 ? ' active' : '');
+      thumb.dataset.page = i;
+      thumb.addEventListener('click', () => goToPdfPage(i));
+
+      try {
+        const page = await state.pdfDoc.getPage(i);
+        const vp = page.getViewport({ scale: 0.3 });
+        const canvas = document.createElement('canvas');
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport: vp }).promise;
+        thumb.appendChild(canvas);
+      } catch {
+        // Jika gagal, tampilkan placeholder
+        thumb.textContent = i;
+        thumb.style.display = 'flex';
+        thumb.style.alignItems = 'center';
+        thumb.style.justifyContent = 'center';
+        thumb.style.color = '#fff';
+        thumb.style.fontSize = '12px';
+      }
+      container.appendChild(thumb);
+    }
   }
-});
 
-// Pengaturan EPUB
-document.getElementById('btn-epub-settings').addEventListener('click', function() {
-  const panel = document.getElementById('epub-settings');
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-});
-document.getElementById('font-sm').addEventListener('click', function() {
-  const viewer = document.getElementById('epub-viewer');
-  let size = parseFloat(window.getComputedStyle(viewer).fontSize) || 16;
-  size = Math.max(10, size - 2);
-  viewer.style.fontSize = size + 'px';
-});
-document.getElementById('font-lg').addEventListener('click', function() {
-  const viewer = document.getElementById('epub-viewer');
-  let size = parseFloat(window.getComputedStyle(viewer).fontSize) || 16;
-  size = Math.min(30, size + 2);
-  viewer.style.fontSize = size + 'px';
-});
-document.querySelectorAll('.theme-btn').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.theme-btn').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    const bg = this.style.backgroundColor;
-    document.getElementById('screen-epub').style.background = bg;
-    document.getElementById('epub-top').style.background = bg;
-    document.getElementById('epub-bottom').style.background = bg;
-    // sesuaikan warna teks
-    const viewer = document.getElementById('epub-viewer');
-    if (bg === '#1a1a2e') {
-      viewer.style.color = '#eee';
-    } else {
-      viewer.style.color = '#3d2b1f';
+  function cleanupPdf() {
+    if (state.pdfRenderTask) {
+      try { state.pdfRenderTask.cancel(); } catch (e) {}
+      state.pdfRenderTask = null;
+    }
+    if (state.pdfDoc) {
+      try { state.pdfDoc.destroy(); } catch (e) {}
+      state.pdfDoc = null;
+    }
+    dom.pdfBook.innerHTML = '';
+    dom.pdfThumbs.innerHTML = '';
+    document.removeEventListener('keydown', pdfKeyHandler);
+    state.isPdf = false;
+    state.currentFile = null;
+  }
+
+  // ============================================================
+  // 9. EPUB LOADER (placeholder — integrasi dengan library EPUB)
+  // ============================================================
+  async function loadEpub(file) {
+    showScreen('progress');
+    dom.progNum.textContent = '0';
+    dom.progFill.style.width = '0%';
+    dom.progLabel.textContent = 'Memuat EPUB...';
+    dom.progSub.textContent = 'Mengurai dokumen';
+    state.cancelFlag = false;
+
+    try {
+      // Simulasi load (karena tidak ada library EPUB di sini, kita tampilkan pesan)
+      // Untuk implementasi nyata, gunakan epub.js atau sejenisnya.
+      // Di sini kita hanya demonstrasi antarmuka.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      dom.progNum.textContent = '100';
+      dom.progFill.style.width = '100%';
+      dom.progSub.textContent = 'Siap dibaca';
+      updateHistoryProgress(file.name, 100);
+
+      // Setup EPUB viewer (placeholder)
+      dom.epubTitle.textContent = file.name;
+      dom.epubViewer.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#555;font-size:16px;padding:20px;text-align:center;background:#fafafa;">
+          <div>
+            <p style="font-size:24px;margin-bottom:12px;">📖</p>
+            <p><strong>${escapeHtml(file.name)}</strong></p>
+            <p style="color:#999;font-size:14px;">EPUB reader memerlukan library tambahan.<br>Fungsi ini adalah demonstrasi antarmuka.</p>
+          </div>
+        </div>
+      `;
+      dom.epubPageLabel.textContent = '1 / 1';
+      dom.epubScrubber.value = 0;
+
+      showScreen('epub');
+
+      // Event listeners EPUB
+      dom.epubBack.onclick = () => {
+        cleanupEpub();
+        showScreen('home');
+      };
+      dom.epubPrev.onclick = () => showToast('Halaman sebelumnya (demo)');
+      dom.epubNext.onclick = () => showToast('Halaman berikutnya (demo)');
+      dom.epubScrubber.oninput = () => {
+        const val = parseFloat(dom.epubScrubber.value);
+        dom.epubPageLabel.textContent = `~ ${Math.round(val)}%`;
+      };
+
+      // Settings toggle
+      dom.btnEpubSettings.onclick = () => {
+        dom.epubSettings.style.display =
+          dom.epubSettings.style.display === 'block' ? 'none' : 'block';
+      };
+      // Font size
+      dom.fontSm.onclick = () => showToast('Perkecil font (demo)');
+      dom.fontLg.onclick = () => showToast('Perbesar font (demo)');
+      // Theme
+      dom.themeSepia.onclick = () => {
+        dom.epubViewer.style.background = '#faf6ef';
+        dom.epubViewer.style.color = '#3d2b1f';
+        setThemeActive('theme-sepia');
+      };
+      dom.themeWhite.onclick = () => {
+        dom.epubViewer.style.background = '#ffffff';
+        dom.epubViewer.style.color = '#000000';
+        setThemeActive('theme-white');
+      };
+      dom.themeDark.onclick = () => {
+        dom.epubViewer.style.background = '#1a1a2e';
+        dom.epubViewer.style.color = '#e0e0e0';
+        setThemeActive('theme-dark');
+      };
+      // Line height
+      dom.lhNormal.onclick = () => {
+        dom.epubViewer.style.lineHeight = '1.5';
+        setLhActive('lh-normal');
+      };
+      dom.lhWide.onclick = () => {
+        dom.epubViewer.style.lineHeight = '2';
+        setLhActive('lh-wide');
+      };
+
+      state.isEpub = true;
+    } catch (err) {
+      console.error('EPUB Load Error:', err);
+      showToast('Gagal memuat EPUB: ' + err.message);
+      showScreen('home');
+    }
+  }
+
+  function setThemeActive(id) {
+    [dom.themeSepia, dom.themeWhite, dom.themeDark].forEach((el) =>
+      el.classList.toggle('on', el.id === id)
+    );
+  }
+
+  function setLhActive(id) {
+    [dom.lhNormal, dom.lhWide].forEach((el) =>
+      el.classList.toggle('on', el.id === id)
+    );
+  }
+
+  function cleanupEpub() {
+    dom.epubViewer.innerHTML = '';
+    dom.epubSettings.style.display = 'none';
+    state.isEpub = false;
+    state.currentFile = null;
+  }
+
+  // ============================================================
+  // 10. PROGRESS CANCEL
+  // ============================================================
+  dom.btnCancel.addEventListener('click', () => {
+    state.cancelFlag = true;
+    if (state.isPdf && state.pdfDoc) {
+      try { state.pdfDoc.destroy(); } catch (e) {}
+      state.pdfDoc = null;
+    }
+    showToast('Pemuatan dibatalkan');
+    showScreen('home');
+  });
+
+  // ============================================================
+  // 11. DROP ZONE & FILE INPUT
+  // ============================================================
+  dom.dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dom.dropZone.classList.add('over');
+  });
+  dom.dropZone.addEventListener('dragleave', () => {
+    dom.dropZone.classList.remove('over');
+  });
+  dom.dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dom.dropZone.classList.remove('over');
+    const files = e.dataTransfer.files;
+    if (files.length) handleFile(files[0]);
+  });
+
+  dom.fileInput.addEventListener('change', () => {
+    if (dom.fileInput.files.length) {
+      handleFile(dom.fileInput.files[0]);
+      dom.fileInput.value = '';
     }
   });
-});
-document.querySelectorAll('.setting-btn.lh').forEach(btn => {
-  btn.addEventListener('click', function() {
-    document.querySelectorAll('.setting-btn.lh').forEach(b => b.classList.remove('on'));
-    this.classList.add('on');
-    const viewer = document.getElementById('epub-viewer');
-    if (this.id === 'lh-normal') viewer.style.lineHeight = '1.6';
-    else viewer.style.lineHeight = '2.2';
-  });
-});
 
-// Tombol hapus semua riwayat
-document.getElementById('btn-clear-all').addEventListener('click', function() {
-  if (confirm('Hapus semua riwayat?')) {
-    history = [];
-    saveHistory();
-  }
-});
-
-// PWA install
-let deferredPrompt;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  document.getElementById('btn-install').classList.add('visible');
-});
-document.getElementById('btn-install').addEventListener('click', async () => {
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    const result = await deferredPrompt.userChoice;
-    if (result.outcome === 'accepted') {
-      showToast('Aplikasi terinstal!');
+  // ============================================================
+  // 12. CLEAR HISTORY
+  // ============================================================
+  dom.btnClearAll.addEventListener('click', () => {
+    if (confirm('Hapus semua riwayat?')) {
+      state.history = [];
+      saveHistory();
+      showToast('Riwayat dibersihkan');
     }
-    deferredPrompt = null;
-    document.getElementById('btn-install').classList.remove('visible');
+  });
+
+  // ============================================================
+  // 13. PWA INSTALL
+  // ============================================================
+  let deferredPrompt;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    dom.btnInstall.classList.add('visible');
+  });
+
+  dom.btnInstall.addEventListener('click', async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const result = await deferredPrompt.userChoice;
+      if (result.outcome === 'accepted') {
+        showToast('Aplikasi terinstal!');
+      }
+      deferredPrompt = null;
+      dom.btnInstall.classList.remove('visible');
+    }
+  });
+
+  // ============================================================
+  // 14. INIT
+  // ============================================================
+  loadHistory();
+  showScreen('home');
+
+  // Override PDF.js worker jika diperlukan (gunakan CDN)
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
-});
 
-// ============================
-// 11. Inisialisasi
-// ============================
-
-loadHistory();
-loadBookmarks();
-showScreen('screen-home');
-
-// Tampilkan toast selamat datang
-showToast('Selamat datang di ReaderApp!', 3000);
+  console.log('📚 ReaderApp siap digunakan');
+})();

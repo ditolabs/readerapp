@@ -560,8 +560,13 @@ body {
 #epub-viewer {
   width: 100%;
   height: 100%;
+  overflow: hidden;
+  background: #faf6ef; /* default sepia */
+}
+#epub-viewer iframe {
+  width: 100% !important;
+  height: 100% !important;
   border: none;
-  background: transparent;
 }
 #epub-bottom {
   background: #fff4e6;

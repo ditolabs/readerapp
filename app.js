@@ -355,7 +355,9 @@ function buildPDFReader(fname, resumePage) {
   thumbs.innerHTML  = '';
 
   // Dimensi: portrait penuh di mobile
-  const bw = Math.min(window.innerWidth - 4, 500);
+  const availH = window.innerHeight - 120; // minus topbar+bottombar
+  const bw = Math.min(Math.floor(availH / 1.414), window.innerWidth - 8, 520);
+  // bh tetap sesuai rasio A4
   const bh = Math.floor(bw * 1.414);
 
   // Isi array dengan placeholder untuk halaman yang belum dirender
@@ -379,7 +381,7 @@ function buildPDFReader(fname, resumePage) {
     swipeDistance: 40,
     showPageCorners: true,
     disableFlipByClick: false,
-    startZIndex: 10,
+    startZIndex: 1,
   });
 
   pdfFlip.loadFromImages(imgList);
@@ -714,7 +716,7 @@ function setupEpubIframe(chapters) {
   const iframe = document.createElement('iframe');
   iframe.id    = 'epub-iframe';
   iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-  iframe.setAttribute('sandbox', 'allow-same-origin');
+  
   viewer.appendChild(iframe);
 
   // Swipe

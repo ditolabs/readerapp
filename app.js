@@ -1,7 +1,6 @@
 /* ════════════════════════════════════════
-   ReaderApp — app.js  v3
-   PDF: St.PageFlip (embedded) + background render
-   EPUB: per-halaman via iframe chapters
+   ReaderApp — app.js  v3.1
+   FIX: PDF fullscreen + flip, EPUB blob URL (Brave)
    ════════════════════════════════════════ */
 
 'use strict';
@@ -253,7 +252,6 @@ async function loadPDF(buf, fname, resumePage) {
     return;
   }
 
-  // Cek St.PageFlip tersedia
   if (typeof St === 'undefined' || !St.PageFlip) {
     toast('pageflip.js gagal dimuat. Coba reload halaman.');
     return;
@@ -278,11 +276,9 @@ async function loadPDF(buf, fname, resumePage) {
   pdfTotal = pdf.numPages;
   document.getElementById('prog-sub').textContent = 'Merender halaman pertama…';
 
-  // Render halaman resume dulu — langsung buka reader
   const startIdx = Math.max(0, Math.min(resumePage || 0, pdfTotal - 1));
   try {
     pdfImages[startIdx] = await renderPDFPage(pdf, startIdx + 1);
-    // Render halaman sebelah (startIdx+1) juga agar StPageFlip tidak kosong
     if (startIdx + 1 < pdfTotal) {
       pdfImages[startIdx + 1] = await renderPDFPage(pdf, startIdx + 2);
     }
@@ -298,7 +294,6 @@ async function loadPDF(buf, fname, resumePage) {
   buildPDFReader(fname, startIdx);
   showScreen('screen-pdf');
 
-  // Render sisa di background
   renderPDFBackground(pdf, fname);
 }
 
@@ -310,11 +305,9 @@ async function renderPDFBackground(pdf, fname) {
       pdfImages[i] = await renderPDFPage(pdf, i + 1);
     } catch (e) {
       console.warn('Gagal render hal', i + 1, e);
-      // Isi placeholder agar StPageFlip tidak crash
       pdfImages[i] = makePlaceholder(i + 1);
     }
     addPDFThumb(i);
-    // Update St.PageFlip dengan gambar baru
     if (pdfFlip) {
       try { pdfFlip.updateFromImages(pdfImages.map(s => s || makePlaceholder('…'))); }
       catch(e) {}
@@ -348,25 +341,40 @@ async function renderPDFPage(pdf, n) {
   return c.toDataURL('image/jpeg', 0.85);
 }
 
+// ══════════════════════════════════════════════
+//  PDF READER — BUILD (FIX DIMENSI)
+// ══════════════════════════════════════════════
+
 function buildPDFReader(fname, resumePage) {
   const bookEl = document.getElementById('pdf-book');
   const thumbs = document.getElementById('pdf-thumbs');
   bookEl.innerHTML  = '';
   thumbs.innerHTML  = '';
 
-  // Dimensi: portrait penuh di mobile
-  const availH = window.innerHeight - 120; // minus topbar+bottombar
-  const bw = Math.min(Math.floor(availH / 1.414), window.innerWidth - 8, 520);
-  // bh tetap sesuai rasio A4
-  const bh = Math.floor(bw * 1.414);
+  // ★ FIX: ambil ukuran dari #pdf-stage (bukan window)
+  const stage = document.getElementById('pdf-stage');
+  const rect  = stage.getBoundingClientRect();
+  let availW  = rect.width - 16;   // padding
+  let availH  = rect.height - 16;
 
-  // Isi array dengan placeholder untuk halaman yang belum dirender
+  // fallback jika rect 0 (belum render)
+  if (availW < 50 || availH < 50) {
+    availW = window.innerWidth - 16;
+    availH = window.innerHeight - 180;
+  }
+
+  // Rasio A4 ~ 1:1.414
+  let bw = Math.min(availW, availH / 1.414);
+  let bh = bw * 1.414;
+  if (bw > 520) { bw = 520; bh = bw * 1.414; }
+  // minimal
+  if (bw < 120) { bw = 120; bh = 170; }
+
   const imgList = [];
   for (let i = 0; i < pdfTotal; i++) {
     imgList.push(pdfImages[i] || makePlaceholder(i + 1));
   }
 
-  // Init St.PageFlip dengan loadFromImages (canvas renderer, lebih ringan di mobile)
   pdfFlip = new St.PageFlip(bookEl, {
     width: bw,
     height: bh,
@@ -389,7 +397,6 @@ function buildPDFReader(fname, resumePage) {
 
   pdfFlip.on('flip', e => onPDFFlip(e.data));
 
-  // Scrubber
   const sc = document.getElementById('pdf-scrubber');
   sc.max   = pdfTotal - 1;
   sc.value = resumePage;
@@ -398,7 +405,6 @@ function buildPDFReader(fname, resumePage) {
     pdfFlip.flip(pg);
   });
 
-  // Thumbnails yang sudah ada
   for (let i = 0; i < pdfImages.length; i++) {
     if (pdfImages[i]) addPDFThumb(i, i === resumePage);
   }
@@ -603,7 +609,6 @@ async function loadWithDIY(buf, fname, resumePage) {
 
   const opfDoc = parser.parseFromString(opfText, 'application/xml');
 
-  // Manifest
   const manifest = {};
   opfDoc.querySelectorAll('manifest item').forEach(it => {
     manifest[it.getAttribute('id')] = {
@@ -612,7 +617,6 @@ async function loadWithDIY(buf, fname, resumePage) {
     };
   });
 
-  // Spine items
   const spineItems = [];
   opfDoc.querySelectorAll('spine itemref').forEach(ref => {
     const m = manifest[ref.getAttribute('idref')];
@@ -627,7 +631,6 @@ async function loadWithDIY(buf, fname, resumePage) {
 
   const t = themes[epubTheme];
 
-  // Parse semua chapter, resolve gambar jadi blob URL
   const chapters = [];
   for (let ci = 0; ci < spineItems.length; ci++) {
     if (cancelLoad) return;
@@ -639,7 +642,6 @@ async function loadWithDIY(buf, fname, resumePage) {
     const chDoc = parser.parseFromString(text, 'text/html');
     chDoc.querySelectorAll('script').forEach(el => el.remove());
 
-    // Resolve images → blob URLs
     const blobUrls = [];
     const imgBase = item.href.includes('/')
       ? item.href.slice(0, item.href.lastIndexOf('/') + 1) : '';
@@ -658,7 +660,6 @@ async function loadWithDIY(buf, fname, resumePage) {
       } catch(e) { img.remove(); }
     }
 
-    // Build standalone HTML string
     const bodyHtml = chDoc.body ? chDoc.body.innerHTML : text;
     const fullHtml = `<!DOCTYPE html><html><head>
 <meta charset="UTF-8">
@@ -685,18 +686,14 @@ async function loadWithDIY(buf, fname, resumePage) {
   epubChapters   = chapters;
   epubTotalPages = chapters.length;
 
-  // Render ke iframe
   setupEpubIframe(chapters);
 
-  // Navigate ke halaman resume
   const startPage = Math.max(0, Math.min(resumePage || 0, chapters.length - 1));
   epubGoTo(startPage, true);
 
-  // Registrasi fungsi apply tema
   applyDIYTheme = () => {
     if (!epubChapters.length) return;
     const th = themes[epubTheme];
-    // Rebuild semua HTML dengan tema baru
     for (let ci = 0; ci < epubChapters.length; ci++) {
       epubChapters[ci].html = epubChapters[ci].html
         .replace(/background:[^;]+;/g, `background:${th.bg};`)
@@ -712,14 +709,13 @@ function setupEpubIframe(chapters) {
   const viewer = document.getElementById('epub-viewer');
   viewer.innerHTML = '';
 
-  // Pakai iframe tunggal, ganti srcDoc saat pindah halaman
   const iframe = document.createElement('iframe');
   iframe.id    = 'epub-iframe';
   iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-  
+  // simpan referensi untuk cleanup blob URL
+  iframe._blobUrl = null;
   viewer.appendChild(iframe);
 
-  // Swipe
   let tx = 0;
   viewer.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
   viewer.addEventListener('touchend', e => {
@@ -727,6 +723,10 @@ function setupEpubIframe(chapters) {
     if (Math.abs(dx) > 50) epubGoTo(epubCurPage + (dx < 0 ? 1 : -1));
   }, { passive: true });
 }
+
+// ══════════════════════════════════════════════
+//  EPUB NAVIGATION — FIX: blob URL bukan srcdoc
+// ══════════════════════════════════════════════
 
 function epubGoTo(page, force = false) {
   if (!force && page === epubCurPage) return;
@@ -736,10 +736,20 @@ function epubGoTo(page, force = false) {
   const iframe = document.getElementById('epub-iframe');
   if (!iframe || !epubChapters[page]) return;
 
-  // Tulis konten ke iframe via srcdoc
-  iframe.srcdoc = epubChapters[page].html;
+  // ★ FIX: pakai blob URL, bukan srcdoc (Brave CSP)
+  // Revoke URL lama
+  if (iframe._blobUrl) {
+    URL.revokeObjectURL(iframe._blobUrl);
+    iframe._blobUrl = null;
+  }
+
+  const html = epubChapters[page].html;
+  const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  iframe._blobUrl = url;
+  iframe.src = url;
+
   iframe.onload = () => {
-    // Scroll ke atas saat pindah halaman
     try { iframe.contentWindow.scrollTo(0, 0); } catch(e) {}
   };
 
@@ -811,8 +821,15 @@ document.getElementById('epub-scrubber').addEventListener('change', e => {
 document.getElementById('epub-back').addEventListener('click', () => {
   cancelLoad = true;
   hideEpubLoading();
+
+  // ★ cleanup blob URL iframe
+  const iframe = document.getElementById('epub-iframe');
+  if (iframe && iframe._blobUrl) {
+    URL.revokeObjectURL(iframe._blobUrl);
+    iframe._blobUrl = null;
+  }
+
   if (foliateView) { try { foliateView.remove(); } catch(e) {} foliateView = null; }
-  // Revoke blob URLs
   epubChapters.forEach(ch => ch.blobUrls?.forEach(u => URL.revokeObjectURL(u)));
   epubChapters  = [];
   applyDIYTheme = null;
@@ -1029,7 +1046,6 @@ if ('serviceWorker' in navigator) {
 
 function tick() { return new Promise(r => setTimeout(r, 0)); }
 
-// ── Update scrubber EPUB — set max saat halaman siap ──
 function syncEpubScrubber() {
   const sc = document.getElementById('epub-scrubber');
   sc.min   = 0;
@@ -1037,9 +1053,6 @@ function syncEpubScrubber() {
   sc.step  = 1;
   sc.value = epubCurPage;
 }
-
-// Panggil syncEpubScrubber setelah epubTotalPages diset
-const _origEpubGoTo = epubGoTo;
 
 // ── INIT ──
 openDB().then(() => renderHistory());

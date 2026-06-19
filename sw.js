@@ -12,6 +12,7 @@ const PRECACHE = [
   './index.html',
   './style.css',
   './app.js',
+  './pageflip.js',
   './manifest.json',
 ];
 

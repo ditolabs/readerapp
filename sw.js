@@ -3,8 +3,8 @@
    Cache-First + Network Fallback strategy
    ════════════════════════════════════════ */
 
-const CACHE_NAME   = 'readerapp-v3';
-const CDN_CACHE    = 'readerapp-cdn-v3';
+const CACHE_NAME   = 'readerapp-v1';
+const CDN_CACHE    = 'readerapp-cdn-v1';
 
 // File app lokal yang wajib di-cache saat install
 const PRECACHE = [

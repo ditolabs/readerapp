@@ -1,8 +1,7 @@
 /* ════════════════════════════════════════
-   ReaderApp — style.css  v3
+   ReaderApp — style.css  v4
    ════════════════════════════════════════ */
 
-/* ── Reset & Base ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -20,7 +19,7 @@
 }
 
 html, body {
-  height: 100%;
+  width: 100%; height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: 'Segoe UI', system-ui, sans-serif;
@@ -28,99 +27,66 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── Screens ── */
-.screen {
-  display: none;
-  flex-direction: column;
-}
-.screen.active { display: flex; }
+/* Semua screen tersembunyi by default */
+.screen { display: none; }
 
 /* ════════════════════════════════════════
-   HOME SCREEN
+   HOME
    ════════════════════════════════════════ */
-
 #screen-home {
+  display: none;
+  flex-direction: column;
   height: 100vh;
   overflow-y: auto;
-  align-items: stretch;
-  padding-bottom: 32px;
 }
+#screen-home.active { display: flex; }
 
 .home-header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   padding: 16px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0; position: sticky; top: 0; z-index: 10;
 }
-
 .home-logo { font-size: 20px; font-weight: 800; letter-spacing: -.5px; }
 .home-logo em { font-style: normal; color: var(--accent); }
 
 .btn-pwa {
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 7px 14px;
-  border-radius: 99px;
-  font-size: 12px;
-  cursor: pointer;
-  display: none;
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--muted); padding: 7px 14px; border-radius: 99px;
+  font-size: 12px; cursor: pointer; display: none;
 }
 .btn-pwa.visible { display: block; }
 .btn-pwa:hover { color: var(--text); border-color: var(--accent); }
 
 .home-body {
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  max-width: 480px;
-  margin: 0 auto;
-  width: 100%;
+  padding: 20px; display: flex; flex-direction: column; gap: 24px;
+  max-width: 480px; margin: 0 auto; width: 100%; padding-bottom: 40px;
 }
 
-/* ── Drop Zone ── */
 .drop-zone {
-  border: 2px dashed rgba(232,176,75,.3);
-  border-radius: var(--radius);
-  padding: 32px 24px;
-  cursor: pointer;
-  transition: all .2s;
-  position: relative;
-  background: var(--surface);
-  text-align: center;
+  border: 2px dashed rgba(232,176,75,.3); border-radius: var(--radius);
+  padding: 32px 24px; cursor: pointer; transition: all .2s;
+  position: relative; background: var(--surface); text-align: center;
 }
 .drop-zone:hover, .drop-zone.over { border-color: var(--accent); background: rgba(232,176,75,.06); }
 .drop-zone input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
+  position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  width: 100%; height: 100%;
 }
 .dz-icon { font-size: 36px; display: block; margin-bottom: 12px; }
 .drop-zone h3 { font-size: 15px; margin-bottom: 5px; }
 .drop-zone p  { font-size: 12px; color: var(--muted); }
-
 .badge-row { display: flex; gap: 8px; justify-content: center; margin-top: 12px; }
 .badge { padding: 3px 11px; border-radius: 99px; font-size: 11px; font-weight: 700; }
 .badge-pdf  { background: rgba(233,69,96,.18);  color: #e94560; border: 1px solid rgba(233,69,96,.3); }
 .badge-epub { background: rgba(91,141,238,.18); color: #5b8dee; border: 1px solid rgba(91,141,238,.3); }
 
-/* ── Section ── */
 .section-head { display: flex; align-items: center; justify-content: space-between; }
 .section-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
 .btn-clear-hist { background: none; border: none; color: var(--muted); font-size: 12px; cursor: pointer; padding: 4px 8px; }
 .btn-clear-hist:hover { color: var(--red); }
 
-/* ── History ── */
 #history-list { display: flex; flex-direction: column; gap: 10px; }
 .hist-empty {
   text-align: center; padding: 24px; color: var(--muted); font-size: 13px;
@@ -129,20 +95,19 @@ html, body {
 .hist-card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 14px 16px; display: flex; align-items: center; gap: 14px;
-  cursor: pointer; transition: background .15s, border-color .15s; position: relative;
+  cursor: pointer; transition: background .15s; position: relative;
 }
-.hist-card:hover, .hist-card:active { background: var(--card2); border-color: rgba(255,255,255,.14); }
+.hist-card:hover, .hist-card:active { background: var(--card2); }
 .hist-type {
   width: 38px; height: 38px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 18px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0;
 }
 .hist-type-pdf  { background: rgba(233,69,96,.15); }
 .hist-type-epub { background: rgba(91,141,238,.15); }
 .hist-info { flex: 1; min-width: 0; }
 .hist-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hist-meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
-.hist-prog-bg { height: 3px; background: var(--surface); border-radius: 99px; margin-top: 8px; overflow: hidden; }
+.hist-meta  { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.hist-prog-bg   { height: 3px; background: var(--surface); border-radius: 99px; margin-top: 8px; overflow: hidden; }
 .hist-prog-fill { height: 100%; border-radius: 99px; }
 .hist-prog-pdf  { background: var(--red); }
 .hist-prog-epub { background: var(--accent2); }
@@ -156,163 +121,134 @@ html, body {
 .hist-arrow { color: var(--muted); font-size: 18px; flex-shrink: 0; }
 
 /* ════════════════════════════════════════
-   PROGRESS SCREEN
+   PROGRESS
    ════════════════════════════════════════ */
 #screen-progress {
-  height: 100vh;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  padding: 32px;
-  text-align: center;
+  display: none; flex-direction: column;
+  height: 100vh; align-items: center; justify-content: center;
+  gap: 14px; padding: 32px; text-align: center;
 }
-.prog-num { font-size: 52px; font-weight: 800; color: var(--accent); line-height: 1; }
+#screen-progress.active { display: flex; }
+
+.prog-num   { font-size: 52px; font-weight: 800; color: var(--accent); line-height: 1; }
 .prog-label { font-size: 15px; font-weight: 600; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prog-sub   { font-size: 12px; color: var(--muted); }
-.prog-bar-bg { width: 100%; max-width: 300px; background: var(--card); border-radius: 99px; height: 6px; overflow: hidden; }
-.prog-bar-fill { height: 100%; width: 0%; border-radius: 99px; transition: width .2s ease; }
+.prog-bar-bg  { width: 100%; max-width: 300px; background: var(--card); border-radius: 99px; height: 6px; overflow: hidden; }
+.prog-bar-fill { height: 100%; width: 0%; border-radius: 99px; transition: width .2s; }
 .pdf-fill  { background: linear-gradient(90deg, #e94560, #f5a623); }
 .epub-fill { background: linear-gradient(90deg, #5b8dee, #a78bfa); }
 .btn-cancel-prog {
   margin-top: 8px; background: none; border: 1px solid var(--border);
   color: var(--muted); padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 13px;
 }
-.btn-cancel-prog:hover { color: var(--text); border-color: var(--muted); }
+.btn-cancel-prog:hover { color: var(--text); }
 
 /* ════════════════════════════════════════
-   PDF READER
+   PDF READER — fullscreen fixed
    ════════════════════════════════════════ */
-
-/* FIX: fixed positioning agar benar-benar fullscreen */
 #screen-pdf {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  background: #111;
-  z-index: 50;
-  overflow: hidden;
   display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  z-index: 999;
   flex-direction: column;
+  overflow: hidden;
 }
 #screen-pdf.active { display: flex; }
 
-/* FIX: pdf-book harus mengisi sisa ruang */
+/* Stage mengisi semua sisa ruang */
 #pdf-stage {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  min-height: 0;     /* penting untuk flexbox di mobile */
   position: relative;
 }
 
 #pdf-book {
-  width: 100%;
-  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* StPageFlip internal elements */
-#pdf-book .stf__parent {
-  margin: auto;
-}
-
-.pf-page { background: #fff; overflow: hidden; }
-.pf-page img { width: 100%; height: 100%; object-fit: contain; display: block; }
-
-/* Top bar — auto-hide overlay */
+/* Top overlay */
 .top-bar {
   position: absolute;
   top: 0; left: 0; right: 0;
-  z-index: 300;           /* FIX: lebih tinggi dari StPageFlip canvas */
-  background: linear-gradient(to bottom, rgba(0,0,0,.9), transparent);
-  padding: 12px 14px 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  z-index: 800;
+  background: linear-gradient(to bottom, rgba(0,0,0,.88) 60%, transparent);
+  padding: 14px 14px 32px 58px;
+  display: flex; align-items: center; gap: 10px;
   transition: opacity .3s;
   pointer-events: auto;
 }
 .top-bar.hide { opacity: 0; pointer-events: none; }
 
-/* Bottom bar — auto-hide overlay */
+/* Bottom overlay */
 .bottom-bar {
   position: absolute;
   bottom: 0; left: 0; right: 0;
-  z-index: 300;           /* FIX: lebih tinggi dari StPageFlip canvas */
-  background: linear-gradient(to top, rgba(0,0,0,.95), transparent);
-  padding: 20px 14px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
+  z-index: 800;
+  background: linear-gradient(to top, rgba(0,0,0,.92) 60%, transparent);
+  padding: 32px 14px 20px;
+  display: flex; flex-direction: column; gap: 9px;
   transition: opacity .3s;
   pointer-events: auto;
 }
 .bottom-bar.hide { opacity: 0; pointer-events: none; }
 
-/* FIX: tombol back selalu tampil, z-index tertinggi */
+/* Back button — TERTINGGI, selalu klikable */
 .pdf-back-btn {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 500;           /* FIX: di atas segalanya */
-  pointer-events: auto !important;
+  top: 8px; left: 8px;
+  z-index: 9999;
+  pointer-events: auto;
 }
 .pdf-back-btn .btn-icon {
-  background: rgba(0,0,0,.75);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 1px solid rgba(255,255,255,.2);
+  background: rgba(0,0,0,.8);
+  border: 1px solid rgba(255,255,255,.25);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  width: 42px; height: 42px;
+  font-size: 18px;
 }
 
 .btn-icon {
-  background: rgba(255,255,255,.12);
-  border: none;
-  color: var(--text);
-  width: 38px; height: 38px;
-  border-radius: 50%;
-  font-size: 15px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
+  background: rgba(255,255,255,.12); border: none;
+  color: var(--text); width: 38px; height: 38px;
+  border-radius: 50%; font-size: 15px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .btn-icon:hover { background: var(--accent); color: #000; }
 
 .top-title {
   font-size: 13px; font-weight: 600; flex: 1;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
 }
 .top-page { font-size: 12px; color: var(--muted); flex-shrink: 0; min-width: 40px; text-align: right; }
 
-/* PDF Thumbnails */
 #pdf-thumbs {
-  display: flex; gap: 5px; overflow-x: auto;
-  padding-bottom: 2px; scrollbar-width: none;
+  display: flex; gap: 5px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none;
 }
 #pdf-thumbs::-webkit-scrollbar { display: none; }
 .thumb {
   flex-shrink: 0; width: 40px; height: 56px; border-radius: 4px;
-  overflow: hidden; cursor: pointer; border: 2px solid transparent;
-  background: #222; transition: border-color .15s;
+  overflow: hidden; cursor: pointer; border: 2px solid transparent; background: #222;
 }
 .thumb.active { border-color: var(--accent); }
 .thumb img    { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* Scrubber & Nav */
 .scrubber { width: 100%; accent-color: var(--accent); cursor: pointer; }
 .nav-row  { display: flex; align-items: center; justify-content: center; gap: 9px; }
 .btn-nav {
   background: rgba(255,255,255,.12); border: none; color: var(--text);
-  width: 38px; height: 38px; border-radius: 50%; font-size: 16px;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  transition: background .2s;
+  width: 38px; height: 38px; border-radius: 50%; font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
 }
 .btn-nav:hover { background: var(--accent); color: #000; }
 .btn-nav:disabled { opacity: .25; cursor: default; pointer-events: none; }
@@ -320,17 +256,14 @@ html, body {
 .page-label strong { color: var(--text); }
 
 /* ════════════════════════════════════════
-   EPUB READER
+   EPUB READER — fullscreen fixed
    ════════════════════════════════════════ */
-
-/* FIX: fixed positioning + explicit height */
 #screen-epub {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 50;
   display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  width: 100%; height: 100%;
+  z-index: 999;
   flex-direction: column;
   overflow: hidden;
 }
@@ -340,19 +273,13 @@ html, body {
   background: #fff4e6;
   border-bottom: 1px solid rgba(0,0,0,.08);
   padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-  position: relative;
-  z-index: 10;
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0; position: relative; z-index: 10;
 }
-
 #epub-title-bar {
   font-size: 13px; font-weight: 600; flex: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #3d2b1f;
 }
-
 .epub-btn {
   background: none; border: 1px solid rgba(0,0,0,.15); color: #555;
   padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer;
@@ -360,24 +287,30 @@ html, body {
 }
 .epub-btn:hover { background: rgba(0,0,0,.06); }
 
-/* FIX: epub-area harus mengisi sisa ruang dengan height eksplisit */
+/* KRITIS: epub-area harus mengisi sisa, min-height: 0 wajib */
 #epub-area {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   position: relative;
   overflow: hidden;
-  min-height: 0;    /* kritis untuk flexbox */
+  display: flex;
+  flex-direction: column;
 }
 
-/* FIX: viewer dan iframe harus 100% height dari parent */
 #epub-viewer {
+  flex: 1 1 0;
+  min-height: 0;
   width: 100%;
-  height: 100%;
   display: block;
+  position: relative;
 }
 
+/* iframe mengisi penuh viewer */
+#epub-viewer iframe,
 #epub-iframe {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
   border: none;
   display: block;
 }
@@ -385,10 +318,8 @@ html, body {
 #epub-bottom {
   background: #fff4e6;
   border-top: 1px solid rgba(0,0,0,.08);
-  padding: 8px 16px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  padding: 8px 16px 14px;
+  display: flex; flex-direction: column; gap: 6px;
   flex-shrink: 0;
 }
 .epub-scrubber { width: 100%; accent-color: #5b8dee; }
@@ -402,18 +333,11 @@ html, body {
 .epub-nav-btn:disabled { opacity: .25; cursor: default; pointer-events: none; }
 .epub-page-label { font-size: 12px; color: #999; min-width: 80px; text-align: center; }
 
-/* ── Settings Panel ── */
+/* Settings panel */
 #epub-settings {
-  display: none;
-  position: absolute;
-  top: 52px; right: 10px;
-  z-index: 200;
-  background: #fff;
-  border: 1px solid rgba(0,0,0,.12);
-  border-radius: 12px;
-  padding: 16px;
-  width: 220px;
-  box-shadow: 0 8px 32px rgba(0,0,0,.15);
+  display: none; position: absolute; top: 52px; right: 10px; z-index: 200;
+  background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 12px;
+  padding: 16px; width: 220px; box-shadow: 0 8px 32px rgba(0,0,0,.15);
 }
 .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .setting-row:last-child { margin-bottom: 0; }
@@ -431,18 +355,11 @@ html, body {
    TOAST
    ════════════════════════════════════════ */
 #toast {
-  position: fixed;
-  bottom: 80px; left: 50%;
+  position: fixed; bottom: 80px; left: 50%;
   transform: translateX(-50%) translateY(20px);
-  background: rgba(30,30,30,.95);
-  color: var(--text);
-  padding: 10px 20px;
-  border-radius: 99px;
-  font-size: 13px;
-  z-index: 9999;
-  opacity: 0;
-  transition: all .25s;
-  pointer-events: none;
-  white-space: nowrap;
+  background: rgba(20,20,20,.95); color: var(--text);
+  padding: 10px 20px; border-radius: 99px; font-size: 13px;
+  z-index: 99999; opacity: 0; transition: all .25s;
+  pointer-events: none; white-space: nowrap;
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

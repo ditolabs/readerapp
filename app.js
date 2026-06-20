@@ -357,13 +357,19 @@ function buildPDFReader(fname, resumePage) {
   thumbs.innerHTML  = '';
 
   // Dimensi: portrait penuh di mobile
-  // Hitung stage area yang tersedia (fullscreen, minus overlay bars)
-  const stageEl = document.getElementById('pdf-stage');
-  const stageH  = stageEl ? stageEl.clientHeight || (window.innerHeight - 10) : window.innerHeight - 10;
-  const stageW  = window.innerWidth;
-  // Cari ukuran halaman yang muat dalam stage
-  const bh = Math.floor(stageH * 0.96);
-  const bw = Math.min(Math.floor(bh / 1.414), stageW - 8, 560);
+  // Gunakan window.innerHeight — sudah akurat saat screen fixed+active
+  // Tidak pakai clientHeight karena bisa 0 sebelum paint
+  const stageW = window.innerWidth;
+  const stageH = window.innerHeight;
+  // Hitung halaman agar muat penuh layar (portrait A4 ratio 1:√2)
+  // Coba fit by height dulu
+  let bh = Math.floor(stageH * 0.92);
+  let bw = Math.floor(bh / 1.414);
+  // Jika terlalu lebar, fit by width
+  if (bw > stageW - 4) {
+    bw = stageW - 4;
+    bh = Math.floor(bw * 1.414);
+  }
 
   // Isi array dengan placeholder untuk halaman yang belum dirender
   const imgList = [];
@@ -630,10 +636,45 @@ async function loadWithDIY(buf, fname, resumePage) {
 
   updateEpubProgress(30);
 
-  const t = themes[epubTheme];
+  // ── Render langsung ke DOM div — tidak pakai iframe sama sekali ──
+  // Ini menghindari CSP/blob URL issue di Brave, Edge, Firefox mobile
+  const viewer = document.getElementById('epub-viewer');
+  viewer.innerHTML = '';
 
-  // Parse semua chapter, resolve gambar jadi blob URL
-  const chapters = [];
+  // Container scroll utama
+  const scroller = document.createElement('div');
+  scroller.id = 'epub-scroller';
+  const t = themes[epubTheme];
+  Object.assign(scroller.style, {
+    width: '100%', height: '100%',
+    overflowY: 'auto', overflowX: 'hidden',
+    background: t.bg, color: t.text,
+    fontFamily: 'Georgia, "Times New Roman", serif',
+    fontSize: epubFontSize + '%',
+    lineHeight: epubLH === 'normal' ? '1.75' : epubLH,
+    WebkitOverflowScrolling: 'touch',
+    boxSizing: 'border-box',
+  });
+  viewer.appendChild(scroller);
+
+  // Swipe navigasi bab
+  let tx = 0, ty = 0;
+  viewer.addEventListener('touchstart', e => {
+    tx = e.touches[0].clientX;
+    ty = e.touches[0].clientY;
+  }, { passive: true });
+  viewer.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - tx;
+    const dy = Math.abs(e.changedTouches[0].clientY - ty);
+    // Hanya swipe horizontal yang jelas (bukan scroll vertikal)
+    if (Math.abs(dx) > 60 && dy < 40) {
+      epubGoTo(epubCurPage + (dx < 0 ? 1 : -1));
+    }
+  }, { passive: true });
+
+  // Simpan semua node chapter sebagai DOM — render satu per satu
+  const chapterNodes = [];
+
   for (let ci = 0; ci < spineItems.length; ci++) {
     if (cancelLoad) return;
     const item = spineItems[ci];
@@ -642,123 +683,118 @@ async function loadWithDIY(buf, fname, resumePage) {
     if (!text) continue;
 
     const chDoc = parser.parseFromString(text, 'text/html');
-    chDoc.querySelectorAll('script').forEach(el => el.remove());
+    chDoc.querySelectorAll('script, link[rel="stylesheet"]').forEach(el => el.remove());
 
-    // Resolve images → blob URLs
-    const blobUrls = [];
+    // Resolve images → blob URLs langsung di atribut src
     const imgBase = item.href.includes('/')
       ? item.href.slice(0, item.href.lastIndexOf('/') + 1) : '';
     for (const img of chDoc.querySelectorAll('img[src]')) {
       const src = img.getAttribute('src');
-      if (src.startsWith('data:') || src.startsWith('http') || src.startsWith('blob:')) continue;
-      const cleanSrc = src.replace(/^(\.\/|\.\.\/)+/, '');
-      const imgPath  = imgBase + cleanSrc;
+      if (!src || src.startsWith('data:') || src.startsWith('http') || src.startsWith('blob:')) continue;
+      const cleanSrc = src.replace(/^(\.\/)/, '').replace(/^\.\.\//, '');
       try {
-        const blob = await zip.readBlob(imgPath);
-        if (blob) {
-          const url = URL.createObjectURL(blob);
-          blobUrls.push(url);
-          img.setAttribute('src', url);
-        }
+        const blob = await zip.readBlob(imgBase + cleanSrc);
+        if (blob) img.setAttribute('src', URL.createObjectURL(blob));
+        else img.remove();
       } catch(e) { img.remove(); }
     }
 
-    // Build standalone HTML string
-    const bodyHtml = chDoc.body ? chDoc.body.innerHTML : text;
-    const fullHtml = `<!DOCTYPE html><html><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-  html,body{margin:0;padding:0;background:${t.bg};color:${t.text};
-    font-family:Georgia,"Times New Roman",serif;
-    font-size:${epubFontSize}%;line-height:${epubLH === 'normal' ? '1.75' : epubLH};
-    padding:20px 20px 40px;box-sizing:border-box;word-wrap:break-word;}
-  img{max-width:100%;height:auto;display:block;margin:8px auto;}
-  a{color:${t.text === '#3d2b1f' ? '#7b5e3a' : '#5b8dee'};}
-  h1,h2,h3{margin-top:24px;margin-bottom:12px;}
-  p{margin:0 0 1em;}
-</style>
-</head><body>${bodyHtml}</body></html>`;
+    // Buat wrapper div untuk chapter ini
+    const chDiv = document.createElement('div');
+    chDiv.dataset.chIdx = ci;
+    chDiv.style.cssText = `
+      display: none;
+      padding: 24px 20px 48px;
+      max-width: 680px;
+      margin: 0 auto;
+      min-height: 100%;
+      box-sizing: border-box;
+    `;
 
-    chapters.push({ html: fullHtml, blobUrls });
+    // Inject inline style reset untuk konten chapter
+    const styleEl = document.createElement('style');
+    styleEl.textContent = `
+      img { max-width: 100%; height: auto; display: block; margin: 8px auto; }
+      a   { color: \${t.text === '#3d2b1f' ? '#7b5e3a' : '#5b8dee'}; }
+      h1,h2,h3 { margin-top: 1.2em; margin-bottom: .5em; }
+      p   { margin: 0 0 .9em; }
+      pre, code { white-space: pre-wrap; word-break: break-word; font-size: 90%; }
+      table { width: 100%; border-collapse: collapse; }
+      td, th { border: 1px solid rgba(128,128,128,.3); padding: 4px 8px; }
+    `;
+    chDiv.appendChild(styleEl);
+
+    if (chDoc.body) {
+      // Pindah semua child nodes
+      while (chDoc.body.firstChild) {
+        chDiv.appendChild(document.adoptNode(chDoc.body.firstChild));
+      }
+    } else {
+      chDiv.innerHTML += text;
+    }
+
+    scroller.appendChild(chDiv);
+    chapterNodes.push(chDiv);
+
     updateEpubProgress(30 + Math.round((ci + 1) / spineItems.length * 55));
-    if (ci % 5 === 0) await tick();
+    if (ci % 3 === 0) await tick();
   }
 
-  if (!chapters.length) throw new Error('Tidak ada konten yang berhasil dimuat');
+  if (!chapterNodes.length) throw new Error('Tidak ada konten yang berhasil dimuat');
 
-  epubChapters   = chapters;
-  epubTotalPages = chapters.length;
+  epubChapters   = chapterNodes; // simpan referensi node
+  epubTotalPages = chapterNodes.length;
 
-  // Render ke iframe
-  setupEpubIframe(chapters);
+  // Track scroll untuk save progress
+  scroller.addEventListener('scroll', () => {
+    const max = scroller.scrollHeight - scroller.clientHeight;
+    if (!max) return;
+    const pct = Math.round(scroller.scrollTop / max * 100);
+    document.getElementById('epub-scrubber').value = epubCurPage;
+    const title = document.getElementById('epub-title-bar').textContent;
+    saveHistory({ id: currentFileId, type: 'epub', title, page: epubCurPage, pct });
+  }, { passive: true });
 
   // Navigate ke halaman resume
-  const startPage = Math.max(0, Math.min(resumePage || 0, chapters.length - 1));
+  const startPage = Math.max(0, Math.min(resumePage || 0, chapterNodes.length - 1));
   epubGoTo(startPage, true);
 
-  // Registrasi fungsi apply tema
+  // Apply tema
   applyDIYTheme = () => {
-    if (!epubChapters.length) return;
     const th = themes[epubTheme];
-    // Rebuild semua HTML dengan tema baru
-    for (let ci = 0; ci < epubChapters.length; ci++) {
-      epubChapters[ci].html = epubChapters[ci].html
-        .replace(/background:[^;]+;/g, `background:${th.bg};`)
-        .replace(/color:[^;]+;/g, `color:${th.text};`)
-        .replace(/font-size:[^;]+;/, `font-size:${epubFontSize}%;`)
-        .replace(/line-height:[^;]+;/, `line-height:${epubLH === 'normal' ? '1.75' : epubLH};`);
-    }
-    epubGoTo(epubCurPage, true);
+    scroller.style.background = th.bg;
+    scroller.style.color      = th.text;
+    scroller.style.fontSize   = epubFontSize + '%';
+    scroller.style.lineHeight = epubLH === 'normal' ? '1.75' : epubLH;
   };
-}
-
-function setupEpubIframe(chapters) {
-  const viewer = document.getElementById('epub-viewer');
-  viewer.innerHTML = '';
-
-  // Pakai iframe tunggal, ganti srcDoc saat pindah halaman
-  const iframe = document.createElement('iframe');
-  iframe.id    = 'epub-iframe';
-  iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
-  
-  viewer.appendChild(iframe);
-
-  // Swipe
-  let tx = 0;
-  viewer.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
-  viewer.addEventListener('touchend', e => {
-    const dx = e.changedTouches[0].clientX - tx;
-    if (Math.abs(dx) > 50) epubGoTo(epubCurPage + (dx < 0 ? 1 : -1));
-  }, { passive: true });
 }
 
 function epubGoTo(page, force = false) {
   if (!force && page === epubCurPage) return;
   if (page < 0 || page >= epubTotalPages) return;
+
+  // Sembunyikan chapter lama
+  if (epubChapters[epubCurPage]) {
+    epubChapters[epubCurPage].style.display = 'none';
+  }
+
   epubCurPage = page;
 
-  const iframe = document.getElementById('epub-iframe');
-  if (!iframe || !epubChapters[page]) return;
+  // Tampilkan chapter baru
+  const ch = epubChapters[page];
+  if (!ch) return;
+  ch.style.display = 'block';
 
-  // Pakai blob URL — srcdoc diblokir CSP di beberapa browser (Brave, Firefox)
-  const blob    = new Blob([epubChapters[page].html], { type: 'text/html' });
-  const blobUrl = URL.createObjectURL(blob);
-
-  // Revoke blob URL sebelumnya jika ada
-  if (iframe._currentBlobUrl) URL.revokeObjectURL(iframe._currentBlobUrl);
-  iframe._currentBlobUrl = blobUrl;
-
-  iframe.src = blobUrl;
-  iframe.onload = () => {
-    try { iframe.contentWindow.scrollTo(0, 0); } catch(e) {}
-  };
+  // Scroll ke atas
+  const scroller = document.getElementById('epub-scroller');
+  if (scroller) scroller.scrollTo({ top: 0, behavior: 'instant' });
 
   updateEpubUI();
   const title = document.getElementById('epub-title-bar').textContent;
   const pct   = Math.round((page + 1) / epubTotalPages * 100);
   saveHistory({ id: currentFileId, type: 'epub', title, page, pct });
 }
+
 
 function updateEpubUI() {
   const pct = Math.round((epubCurPage + 1) / epubTotalPages * 100);

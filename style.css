@@ -113,7 +113,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 .reader-toolbar {
   position: absolute; top: 0; left: 0; right: 0;
   z-index: 50;
-  padding: 10px 16px;
+  padding: 10px 16px 10px 130px; /* kiri: ruang untuk tombol back */
   background: rgba(0,0,0,.75);
   backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   display: flex; justify-content: space-between; align-items: center;
@@ -146,6 +146,33 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
 }
 
 #pdf-book { display: flex; align-items: center; justify-content: center; }
+
+
+/* Tombol back PDF — SELALU visible, di atas semua layer termasuk tap zones */
+.pdf-back-fixed {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 9999;           /* lebih tinggi dari tap zones (z-index:10) */
+  pointer-events: auto !important;
+  background: rgba(0,0,0,.75);
+  border: 1px solid rgba(255,255,255,.25);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  white-space: nowrap;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.pdf-back-fixed:active { background: rgba(255,255,255,.2); }
 
 /* Tap zones — pola DeepSeek */
 .tap-zone {

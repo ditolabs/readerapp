@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0d0d0d">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -14,184 +14,164 @@
 </head>
 <body>
 
-<!-- ════════════════════════════════
-     ① HOME SCREEN
-     ════════════════════════════════ -->
-<main id="screen-home" class="screen active">
-
+<!-- ══════════════════════════════════════
+     HOME SCREEN
+     ══════════════════════════════════════ -->
+<main id="screen-home">
   <header class="home-header">
     <div class="home-logo">📚 <em>Reader</em>App</div>
     <button class="btn-pwa" id="btn-install" aria-label="Install aplikasi">⬇ Install App</button>
   </header>
-
   <div class="home-body">
-
-    <!-- Drop Zone -->
-    <section aria-label="Buka file baru">
+    <section>
       <div class="drop-zone" id="drop-zone">
         <input type="file" id="file-input" accept=".pdf,.epub" aria-label="Pilih file PDF atau EPUB">
-        <span class="dz-icon" aria-hidden="true">📖</span>
+        <span class="dz-icon">📖</span>
         <h3>Buka PDF atau EPUB</h3>
         <p>Seret file ke sini atau klik untuk memilih</p>
-        <div class="badge-row" aria-hidden="true">
+        <div class="badge-row">
           <span class="badge badge-pdf">PDF</span>
           <span class="badge badge-epub">EPUB</span>
         </div>
       </div>
     </section>
-
-    <!-- History -->
-    <section aria-label="Riwayat bacaan">
+    <section>
       <div class="section-head">
         <h2 class="section-title">Terakhir Dibaca</h2>
-        <button class="btn-clear-hist" id="btn-clear-all" aria-label="Hapus semua riwayat">Hapus Semua</button>
+        <button class="btn-clear-hist" id="btn-clear-all">Hapus Semua</button>
       </div>
       <div style="height:10px"></div>
-      <div id="history-list" role="list" aria-label="Daftar buku terakhir dibaca"></div>
+      <div id="history-list"></div>
     </section>
-
   </div>
 </main>
 
-
-<!-- ════════════════════════════════
-     ② PROGRESS SCREEN
-     ════════════════════════════════ -->
-<section id="screen-progress" class="screen" aria-live="polite" aria-label="Memuat file">
-  <div class="prog-num" id="prog-num" aria-hidden="true">0</div>
+<!-- ══════════════════════════════════════
+     PROGRESS SCREEN
+     ══════════════════════════════════════ -->
+<div id="screen-progress" class="reader-hidden">
+  <div class="prog-num" id="prog-num">0</div>
   <div class="prog-label" id="prog-label">Memproses…</div>
-  <div class="prog-sub"   id="prog-sub">Mohon tunggu</div>
-  <div class="prog-bar-bg" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+  <div class="prog-sub" id="prog-sub">Mohon tunggu</div>
+  <div class="prog-bar-bg">
     <div class="prog-bar-fill" id="prog-fill"></div>
   </div>
   <button class="btn-cancel-prog" id="btn-cancel">Batal</button>
-</section>
+</div>
 
+<!-- ══════════════════════════════════════
+     PDF READER
+     Pola dari DeepSeek: selalu ada di DOM,
+     show/hide via class reader-hidden/reader-visible
+     ══════════════════════════════════════ -->
+<div id="reader-pdf" class="reader-hidden">
 
-<!-- ════════════════════════════════
-     ③ PDF READER
-     ════════════════════════════════ -->
-<section id="screen-pdf" class="screen" aria-label="PDF Reader">
-
-  <!-- Back — selalu tampil, tidak ikut auto-hide -->
-  <div class="pdf-back-btn">
-    <button class="btn-icon" id="pdf-back" aria-label="Kembali ke beranda">←</button>
+  <!-- Toolbar — auto-hide, tap tengah untuk show -->
+  <div class="reader-toolbar" id="pdf-toolbar">
+    <div class="toolbar-left">
+      <button class="toolbar-btn" id="pdf-back" title="Kembali">← Kembali</button>
+    </div>
+    <div class="toolbar-center">
+      <span id="pdf-title" class="toolbar-title"></span>
+    </div>
+    <div class="toolbar-right">
+      <span id="pdf-top-page" class="toolbar-page"></span>
+    </div>
   </div>
 
-  <!-- Top bar (auto-hide) -->
-  <div class="top-bar" id="pdf-topbar" style="padding-left:58px;" aria-label="Info halaman">
-    <div class="top-title" id="pdf-title" aria-live="polite">—</div>
-    <div class="top-page"  id="pdf-top-page" aria-live="polite">1/1</div>
-  </div>
-
-  <!-- Book stage -->
-  <div id="pdf-stage" aria-label="Halaman buku">
+  <!-- Stage PDF -->
+  <div class="reader-stage" id="pdf-stage">
     <div id="pdf-book"></div>
+
+    <!-- Tap zones: kiri=prev, kanan=next, tengah=toggle toolbar -->
+    <div class="tap-zone tap-left"   id="tap-pdf-left"></div>
+    <div class="tap-zone tap-right"  id="tap-pdf-right"></div>
+    <div class="tap-zone tap-center" id="tap-pdf-center"></div>
   </div>
 
-  <!-- Bottom bar (auto-hide) -->
-  <div class="bottom-bar" id="pdf-bottombar">
-    <div id="pdf-thumbs" role="listbox" aria-label="Thumbnail halaman"></div>
-    <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0"
-           aria-label="Posisi halaman">
-    <nav class="nav-row" aria-label="Navigasi PDF">
+  <!-- Bottom bar — auto-hide -->
+  <div class="reader-bottom" id="pdf-bottom">
+    <!-- Thumbnails -->
+    <div id="pdf-thumbs"></div>
+    <!-- Scrubber -->
+    <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0" aria-label="Posisi halaman">
+    <!-- Nav -->
+    <nav class="nav-row">
       <button class="btn-nav" id="pdf-first" aria-label="Halaman pertama">⏮</button>
-      <button class="btn-nav" id="pdf-prev"  aria-label="Halaman sebelumnya">‹</button>
-      <div class="page-label" id="pdf-page-label" aria-live="polite">
-        Hal <strong>1</strong>/1
-      </div>
-      <button class="btn-nav" id="pdf-next" aria-label="Halaman berikutnya">›</button>
+      <button class="btn-nav" id="pdf-prev"  aria-label="Sebelumnya">‹</button>
+      <span class="page-label" id="pdf-page-label">Hal <strong>1</strong>/1</span>
+      <button class="btn-nav" id="pdf-next" aria-label="Berikutnya">›</button>
       <button class="btn-nav" id="pdf-last" aria-label="Halaman terakhir">⏭</button>
     </nav>
   </div>
 
-</section>
+</div>
 
+<!-- ══════════════════════════════════════
+     EPUB READER
+     ══════════════════════════════════════ -->
+<div id="reader-epub" class="reader-hidden">
 
-<!-- ════════════════════════════════
-     ④ EPUB READER
-     ════════════════════════════════ -->
-<section id="screen-epub" class="screen" aria-label="EPUB Reader">
-
-  <header id="epub-top">
-    <button class="epub-btn" id="epub-back" aria-label="Kembali ke beranda">← Kembali</button>
-    <div id="epub-title-bar" aria-live="polite">—</div>
-    <button class="epub-btn" id="btn-epub-settings" aria-label="Pengaturan tampilan" aria-expanded="false">⚙</button>
+  <div id="epub-top">
+    <button class="epub-btn" id="epub-back">← Kembali</button>
+    <div id="epub-title-bar">—</div>
+    <button class="epub-btn" id="btn-epub-settings" aria-expanded="false">⚙</button>
 
     <!-- Settings panel -->
-    <div id="epub-settings" role="dialog" aria-label="Pengaturan EPUB" aria-modal="true">
+    <div id="epub-settings">
       <div class="setting-row">
-        <span class="setting-label" id="lbl-font">Ukuran Font</span>
-        <div class="setting-btns" role="group" aria-labelledby="lbl-font">
-          <button class="setting-btn" id="font-sm" aria-label="Perkecil font">A-</button>
-          <button class="setting-btn" id="font-lg" aria-label="Perbesar font">A+</button>
+        <span class="setting-label">Ukuran Font</span>
+        <div class="setting-btns">
+          <button class="setting-btn" id="font-sm">A-</button>
+          <button class="setting-btn" id="font-lg">A+</button>
         </div>
       </div>
       <div class="setting-row">
-        <span class="setting-label" id="lbl-theme">Tema Warna</span>
-        <div class="setting-btns" role="group" aria-labelledby="lbl-theme">
-          <button class="theme-btn on" id="theme-sepia" aria-label="Tema Sepia"
-                  style="background:#faf6ef;border-color:#c8a96e"></button>
-          <button class="theme-btn" id="theme-white" aria-label="Tema Putih"
-                  style="background:#ffffff"></button>
-          <button class="theme-btn" id="theme-dark"  aria-label="Tema Gelap"
-                  style="background:#1a1a2e"></button>
+        <span class="setting-label">Tema</span>
+        <div class="setting-btns">
+          <button class="theme-btn on" id="theme-sepia" style="background:#faf6ef;border-color:#c8a96e"></button>
+          <button class="theme-btn"    id="theme-white" style="background:#ffffff"></button>
+          <button class="theme-btn"    id="theme-dark"  style="background:#1a1a2e"></button>
         </div>
       </div>
       <div class="setting-row">
-        <span class="setting-label" id="lbl-lh">Spasi Baris</span>
-        <div class="setting-btns" role="group" aria-labelledby="lbl-lh">
-          <button class="setting-btn on" id="lh-normal" aria-pressed="true">Normal</button>
-          <button class="setting-btn"    id="lh-wide"   aria-pressed="false">Lebar</button>
+        <span class="setting-label">Spasi Baris</span>
+        <div class="setting-btns">
+          <button class="setting-btn on" id="lh-normal">Normal</button>
+          <button class="setting-btn"    id="lh-wide">Lebar</button>
         </div>
       </div>
     </div>
-  </header>
-
-  <div id="epub-area">
-    <div id="epub-viewer" aria-label="Konten buku"></div>
   </div>
 
-  <footer id="epub-bottom">
-    <input type="range" class="epub-scrubber" id="epub-scrubber"
-           min="0" max="100" value="0" step="0.1"
-           aria-label="Posisi bacaan">
-    <nav class="epub-nav" aria-label="Navigasi EPUB">
-      <button class="epub-nav-btn" id="epub-prev" aria-label="Halaman sebelumnya">‹</button>
-      <div class="epub-page-label" id="epub-page-label" aria-live="polite">—</div>
-      <button class="epub-nav-btn" id="epub-next" aria-label="Halaman berikutnya">›</button>
+  <div id="epub-area">
+    <div id="epub-viewer"></div>
+  </div>
+
+  <div id="epub-bottom">
+    <input type="range" class="epub-scrubber" id="epub-scrubber" min="0" max="100" value="0" step="1">
+    <nav class="epub-nav">
+      <button class="epub-nav-btn" id="epub-prev">‹</button>
+      <span class="epub-page-label" id="epub-page-label">—</span>
+      <button class="epub-nav-btn" id="epub-next">›</button>
     </nav>
-  </footer>
+  </div>
 
-</section>
-
+</div>
 
 <!-- Toast -->
-<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="toast"></div>
 
-
-<!-- ════════════════════════════════
-     LIBRARIES (CDN)
-     ════════════════════════════════ -->
-
-<!-- PDF.js via CDN (worker diset di app.js) -->
+<!-- Libraries -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-  // Set worker URL setelah PDF.js dimuat
   if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
-
-<!-- StPageFlip 2.0.7 — embedded lokal, tidak perlu CDN -->
 <script src="pageflip.js"></script>
-
-<!-- Foliate-js (EPUB renderer) — opsional, fallback ke parser bawaan jika tidak ada -->
-<script src="foliate.js" onerror="console.info('Foliate.js tidak ada, menggunakan parser bawaan')"></script>
-
-<!-- App logic -->
+<script src="foliate.js" onerror="console.info('Foliate tidak tersedia')"></script>
 <script src="app.js"></script>
-
 </body>
 </html>

@@ -214,10 +214,16 @@ async function loadPDF(buf, fname, resumePage) {
 
   await saveHistory({ id:currentFileId, type:'pdf', title:fname, page:startIdx, total:pdfTotal, pct:0 });
 
+  // Simpan ref PDF untuk TOC dan TTS
+  _pdfDocRef = pdf;
+
   // Tampilkan reader dulu, baru build (agar clientHeight valid)
   showReader('reader-pdf');
   await new Promise(r => requestAnimationFrame(r));
   buildPDFReader(fname, startIdx);
+
+  // Load TOC di background
+  loadPDFTOC(pdf);
 
   // Render sisa di background
   renderPDFBackground(pdf, fname);
@@ -321,6 +327,11 @@ function onPDFFlip(idx) {
   updatePDFUI(idx);
   saveHistory({ id:currentFileId, type:'pdf', title:document.getElementById('pdf-title').textContent,
     page:idx, total:pdfTotal, pct:Math.round((idx+1)/pdfTotal*100) });
+  // Reset zoom saat ganti halaman
+  if (pdfZoom !== 1.0) resetPDFZoom();
+  // Update grid active thumb
+  document.querySelectorAll('#pdf-grid-body .grid-thumb').forEach(t =>
+    t.classList.toggle('active', parseInt(t.dataset.i) === idx));
 }
 
 function updatePDFUI(idx) {
@@ -377,8 +388,12 @@ document.getElementById('pdf-last').addEventListener('click',  () => pdfFlip?.fl
 
 document.getElementById('pdf-back').addEventListener('click', () => {
   cancelLoad = true;
+  TTS.stop();
+  closePDFTOC();
+  closePDFGrid();
+  resetPDFZoom();
   if (pdfFlip) { try { pdfFlip.destroy(); } catch(e) {} pdfFlip=null; }
-  pdfImages = [];
+  pdfImages = []; _pdfDocRef = null; pdfOutline = [];
   document.getElementById('pdf-book').innerHTML   = '';
   document.getElementById('pdf-thumbs').innerHTML = '';
   document.getElementById('pdf-toolbar').classList.remove('visible');
@@ -564,6 +579,7 @@ async function loadWithDIY(buf, fname, resumePage) {
 
     const chDiv = document.createElement('div');
     chDiv.dataset.chIdx = ci;
+    chDiv.dataset.href  = item.href; // untuk TOC lookup
     chDiv.style.cssText = 'display:none;padding:24px 20px 48px;max-width:680px;margin:0 auto;min-height:100%;box-sizing:border-box;';
 
     const styleEl = document.createElement('style');
@@ -591,6 +607,9 @@ async function loadWithDIY(buf, fname, resumePage) {
 
   epubChapters   = chapterNodes;
   epubTotalPages = chapterNodes.length;
+
+  // Load EPUB TOC
+  await loadEPUBTOC(zip, opfBase, opfDoc);
 
   scroller.addEventListener('scroll', () => {
     const max = scroller.scrollHeight-scroller.clientHeight;
@@ -623,8 +642,20 @@ function epubGoTo(page, force=false) {
   const scroller = document.getElementById('epub-scroller');
   if (scroller) scroller.scrollTo({ top:0, behavior:'instant' });
   updateEpubUI();
+  updateEPUBTOCActive(page);
   const title = document.getElementById('epub-title-bar').textContent;
   saveHistory({ id:currentFileId, type:'epub', title, page, pct:Math.round((page+1)/epubTotalPages*100) });
+}
+
+function updateEPUBTOCActive(page) {
+  // Highlight TOC item yang sesuai dengan chapter saat ini
+  const items = document.querySelectorAll('#epub-toc-list .toc-item');
+  if (!items.length) return;
+  const curHref = epubChapters[page]?.dataset?.href || '';
+  items.forEach((el, i) => {
+    const match = epubTOC[i] && curHref.includes(epubTOC[i].href);
+    el.classList.toggle('active', match);
+  });
 }
 
 function updateEpubUI() {
@@ -670,9 +701,11 @@ document.getElementById('epub-scrubber').addEventListener('change', e => {
 
 document.getElementById('epub-back').addEventListener('click', () => {
   cancelLoad = true;
+  TTS.stop();
+  closeEPUBTOC();
   hideEpubLoading();
   if (foliateView) { try { foliateView.remove(); } catch(e) {} foliateView=null; }
-  epubChapters=[]; applyDIYTheme=null;
+  epubChapters=[]; epubTOC=[]; applyDIYTheme=null;
   document.getElementById('epub-viewer').innerHTML='';
   fileInput.value='';
   showHome();
@@ -808,3 +841,508 @@ function tick(){ return new Promise(r=>setTimeout(r,0)); }
 
 // INIT
 openDB().then(()=>renderHistory());
+
+// ══════════════════════════════════════════════
+//  ZOOM PDF
+// ══════════════════════════════════════════════
+let pdfZoom = 1.0;
+const ZOOM_MIN = 0.5, ZOOM_MAX = 3.0, ZOOM_STEP = 0.25;
+
+function applyPDFZoom() {
+  const book = document.getElementById('pdf-book');
+  if (!book) return;
+  book.style.transform = `scale(${pdfZoom})`;
+  book.style.transformOrigin = 'center center';
+}
+
+document.getElementById('pdf-btn-zoom-in').addEventListener('click', () => {
+  pdfZoom = Math.min(ZOOM_MAX, +(pdfZoom + ZOOM_STEP).toFixed(2));
+  applyPDFZoom();
+  toast(`Zoom ${Math.round(pdfZoom*100)}%`);
+});
+
+document.getElementById('pdf-btn-zoom-out').addEventListener('click', () => {
+  pdfZoom = Math.max(ZOOM_MIN, +(pdfZoom - ZOOM_STEP).toFixed(2));
+  applyPDFZoom();
+  toast(`Zoom ${Math.round(pdfZoom*100)}%`);
+});
+
+// Pinch-to-zoom
+(function() {
+  const stage = document.getElementById('pdf-stage');
+  let initDist = 0, initZoom = 1;
+
+  stage.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      initDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      initZoom = pdfZoom;
+    }
+  }, { passive: true });
+
+  stage.addEventListener('touchmove', e => {
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      pdfZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, +(initZoom * dist / initDist).toFixed(2)));
+      applyPDFZoom();
+    }
+  }, { passive: true });
+})();
+
+// Reset zoom saat ganti halaman
+function resetPDFZoom() {
+  pdfZoom = 1.0;
+  applyPDFZoom();
+}
+
+// ══════════════════════════════════════════════
+//  TOC PDF
+// ══════════════════════════════════════════════
+let pdfOutline = [];
+let _pdfDocRef = null; // simpan referensi PDF document
+
+async function loadPDFTOC(pdf) {
+  _pdfDocRef = pdf;
+  try {
+    const outline = await pdf.getOutline();
+    pdfOutline = outline || [];
+  } catch(e) {
+    pdfOutline = [];
+  }
+}
+
+function renderPDFTOC() {
+  const list = document.getElementById('pdf-toc-list');
+  list.innerHTML = '';
+
+  if (!pdfOutline.length) {
+    list.innerHTML = '<div class="toc-empty">Buku ini tidak memiliki Daftar Isi digital.</div>';
+    return;
+  }
+
+  function renderItems(items, depth) {
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.className = `toc-item${depth > 0 ? ' indent-' + Math.min(depth, 2) : ''}`;
+      el.textContent = item.title || '(tanpa judul)';
+      el.addEventListener('click', async () => {
+        if (item.dest && _pdfDocRef) {
+          try {
+            let dest = item.dest;
+            if (typeof dest === 'string') dest = await _pdfDocRef.getDestination(dest);
+            if (dest) {
+              const ref = dest[0];
+              const pageNum = await _pdfDocRef.getPageIndex(ref);
+              pdfFlip?.flip(pageNum);
+            }
+          } catch(e) {}
+        }
+        closePDFTOC();
+      });
+      list.appendChild(el);
+      if (item.items?.length) renderItems(item.items, depth + 1);
+    });
+  }
+
+  renderItems(pdfOutline, 0);
+  updatePDFTOCActive();
+}
+
+function updatePDFTOCActive() {
+  // Tandai item aktif berdasarkan halaman saat ini (simplified)
+  document.querySelectorAll('#pdf-toc-list .toc-item').forEach((el, i) => {
+    el.classList.remove('active');
+  });
+}
+
+function openPDFTOC() {
+  renderPDFTOC();
+  document.getElementById('pdf-toc-panel').classList.remove('reader-hidden');
+  document.getElementById('pdf-btn-toc').classList.add('active');
+}
+
+function closePDFTOC() {
+  document.getElementById('pdf-toc-panel').classList.add('reader-hidden');
+  document.getElementById('pdf-btn-toc').classList.remove('active');
+}
+
+document.getElementById('pdf-btn-toc').addEventListener('click', () => {
+  const panel = document.getElementById('pdf-toc-panel');
+  if (panel.classList.contains('reader-hidden')) openPDFTOC();
+  else closePDFTOC();
+});
+document.getElementById('pdf-toc-close').addEventListener('click', closePDFTOC);
+
+// ══════════════════════════════════════════════
+//  TOC EPUB
+// ══════════════════════════════════════════════
+let epubTOC = []; // array of { title, page }
+
+async function loadEPUBTOC(zip, opfBase, opfDoc) {
+  epubTOC = [];
+  try {
+    // Cari nav.xhtml (EPUB3) atau toc.ncx (EPUB2)
+    const manifest = {};
+    opfDoc.querySelectorAll('manifest item').forEach(it => {
+      manifest[it.getAttribute('id')] = {
+        href: opfBase + it.getAttribute('href'),
+        type: it.getAttribute('media-type'),
+        props: it.getAttribute('properties') || '',
+      };
+    });
+
+    // EPUB3: cari item dengan properties="nav"
+    const navItem = Object.values(manifest).find(m => m.props.includes('nav'));
+    if (navItem) {
+      const navText = await zip.readText(navItem.href);
+      if (navText) {
+        const parser = new DOMParser();
+        const navDoc = parser.parseFromString(navText, 'text/html');
+        const navEl  = navDoc.querySelector('nav[epub\\:type="toc"], nav');
+        navEl?.querySelectorAll('li').forEach(li => {
+          const a = li.querySelector('a');
+          if (!a) return;
+          const title = a.textContent.trim();
+          const href  = a.getAttribute('href')?.split('#')[0] || '';
+          const depth = (li.closest('ol')?.closest('li') ? 1 : 0) +
+                        (li.closest('ol')?.closest('li')?.closest('ol')?.closest('li') ? 1 : 0);
+          epubTOC.push({ title, href, depth });
+        });
+        if (epubTOC.length) return;
+      }
+    }
+
+    // EPUB2: cari toc.ncx
+    const ncxItem = Object.values(manifest).find(m => m.type === 'application/x-dtbncx+xml');
+    if (ncxItem) {
+      const ncxText = await zip.readText(ncxItem.href);
+      if (ncxText) {
+        const parser = new DOMParser();
+        const ncxDoc = parser.parseFromString(ncxText, 'application/xml');
+        ncxDoc.querySelectorAll('navPoint').forEach(np => {
+          const title   = np.querySelector('navLabel text')?.textContent?.trim() || '';
+          const content = np.querySelector('content')?.getAttribute('src') || '';
+          const href    = content.split('#')[0];
+          const depth   = (np.closest('navPoint')?.closest('navPoint') ? 2 :
+                           np.closest('navPoint') ? 1 : 0);
+          if (title) epubTOC.push({ title, href, depth });
+        });
+      }
+    }
+  } catch(e) { console.warn('loadEPUBTOC:', e); }
+}
+
+function renderEPUBTOC() {
+  const list = document.getElementById('epub-toc-list');
+  list.innerHTML = '';
+
+  if (!epubTOC.length) {
+    list.innerHTML = '<div class="toc-empty">Buku ini tidak memiliki Daftar Isi digital.</div>';
+    return;
+  }
+
+  // Map href ke index chapter
+  epubTOC.forEach(item => {
+    const el = document.createElement('div');
+    el.className = `toc-item${item.depth > 0 ? ' indent-' + Math.min(item.depth, 2) : ''}`;
+    el.textContent = item.title;
+    el.addEventListener('click', () => {
+      // Cari chapter yang href-nya cocok
+      const idx = epubChapters.findIndex((_, i) => {
+        const node = epubChapters[i];
+        return node && node.dataset?.href && node.dataset.href.includes(item.href);
+      });
+      if (idx >= 0) epubGoTo(idx);
+      else {
+        // Fallback: cari berdasarkan urutan TOC
+        const tocIdx = epubTOC.indexOf(item);
+        const approxPage = Math.floor(tocIdx / epubTOC.length * epubTotalPages);
+        epubGoTo(approxPage);
+      }
+      closeEPUBTOC();
+    });
+    list.appendChild(el);
+  });
+}
+
+function openEPUBTOC() {
+  renderEPUBTOC();
+  document.getElementById('epub-toc-panel').classList.remove('reader-hidden');
+  document.getElementById('epub-btn-toc').classList.add('active');
+}
+
+function closeEPUBTOC() {
+  document.getElementById('epub-toc-panel').classList.add('reader-hidden');
+  document.getElementById('epub-btn-toc').classList.remove('active');
+}
+
+document.getElementById('epub-btn-toc').addEventListener('click', () => {
+  const panel = document.getElementById('epub-toc-panel');
+  if (panel.classList.contains('reader-hidden')) openEPUBTOC();
+  else closeEPUBTOC();
+});
+document.getElementById('epub-toc-close').addEventListener('click', closeEPUBTOC);
+
+// ══════════════════════════════════════════════
+//  THUMBNAIL GRID PDF
+// ══════════════════════════════════════════════
+function openPDFGrid() {
+  const modal = document.getElementById('pdf-grid-modal');
+  const body  = document.getElementById('pdf-grid-body');
+  modal.classList.remove('reader-hidden');
+  body.innerHTML = '';
+
+  for (let i = 0; i < pdfTotal; i++) {
+    const thumb = document.createElement('div');
+    thumb.className = 'grid-thumb' + (i === pdfCurrent ? ' active' : '');
+    thumb.dataset.i = i;
+
+    if (pdfImages[i]) {
+      const img = new Image();
+      img.src = pdfImages[i];
+      img.alt = `Hal ${i+1}`;
+      thumb.appendChild(img);
+    } else {
+      thumb.innerHTML = `<div class="grid-loading">Hal ${i+1}</div>`;
+    }
+
+    const num = document.createElement('div');
+    num.className = 'grid-thumb-num';
+    num.textContent = i + 1;
+    thumb.appendChild(num);
+
+    thumb.addEventListener('click', () => {
+      pdfFlip?.flip(i);
+      closePDFGrid();
+    });
+
+    body.appendChild(thumb);
+  }
+
+  // Scroll ke halaman aktif
+  setTimeout(() => {
+    const active = body.querySelector('.grid-thumb.active');
+    if (active) active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, 100);
+}
+
+function closePDFGrid() {
+  document.getElementById('pdf-grid-modal').classList.add('reader-hidden');
+  document.getElementById('pdf-btn-grid').classList.remove('active');
+}
+
+document.getElementById('pdf-btn-grid').addEventListener('click', () => {
+  const modal = document.getElementById('pdf-grid-modal');
+  if (modal.classList.contains('reader-hidden')) {
+    document.getElementById('pdf-btn-grid').classList.add('active');
+    openPDFGrid();
+  } else {
+    closePDFGrid();
+  }
+});
+document.getElementById('pdf-grid-close').addEventListener('click', closePDFGrid);
+
+// ══════════════════════════════════════════════
+//  TTS — Text-to-Speech (Web Speech API)
+// ══════════════════════════════════════════════
+const TTS = {
+  utterance: null,
+  sentences: [],
+  idx: 0,
+  playing: false,
+  mode: null, // 'pdf' | 'epub'
+
+  // Ambil teks dari halaman PDF saat ini via PDF.js
+  async extractPDFText(pageNum) {
+    if (!_pdfDocRef) return '';
+    try {
+      const page    = await _pdfDocRef.getPage(pageNum + 1);
+      const content = await page.getTextContent();
+      return content.items.map(i => i.str).join(' ').replace(/\s+/g, ' ').trim();
+    } catch(e) { return ''; }
+  },
+
+  // Ambil teks dari chapter EPUB saat ini
+  extractEPUBText() {
+    const ch = epubChapters[epubCurPage];
+    if (!ch) return '';
+    const clone = ch.cloneNode(true);
+    clone.querySelectorAll('style, script').forEach(e => e.remove());
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+  },
+
+  // Pecah teks jadi kalimat
+  splitSentences(text) {
+    return text.match(/[^.!?]+[.!?]+/g)?.map(s => s.trim()).filter(Boolean) || [text];
+  },
+
+  async start(mode) {
+    this.stop();
+    this.mode = mode;
+    this.idx  = 0;
+
+    let text = '';
+    if (mode === 'pdf') {
+      const panel = document.getElementById('pdf-tts-panel');
+      panel.classList.remove('reader-hidden');
+      document.getElementById('pdf-tts-text').textContent = 'Mengekstrak teks…';
+      text = await this.extractPDFText(pdfCurrent);
+    } else {
+      const panel = document.getElementById('epub-tts-panel');
+      panel.classList.remove('reader-hidden');
+      document.getElementById('epub-tts-text').textContent = 'Mengambil teks…';
+      text = this.extractEPUBText();
+    }
+
+    if (!text) { toast('Tidak ada teks yang bisa dibaca'); return; }
+    this.sentences = this.splitSentences(text);
+    this.playing = true;
+    this.speakNext();
+  },
+
+  speakNext() {
+    if (!this.playing || this.idx >= this.sentences.length) {
+      this.playing = false;
+      this.updatePlayBtn();
+      return;
+    }
+
+    const sentence = this.sentences[this.idx];
+    const infoEl   = document.getElementById(this.mode + '-tts-text');
+    if (infoEl) infoEl.textContent = sentence;
+
+    this.utterance = new SpeechSynthesisUtterance(sentence);
+    this.utterance.lang  = 'id-ID';
+    this.utterance.rate  = 1.0;
+    this.utterance.pitch = 1.0;
+    this.utterance.onend = () => {
+      if (this.playing) { this.idx++; this.speakNext(); }
+    };
+    this.utterance.onerror = () => {
+      if (this.playing) { this.idx++; this.speakNext(); }
+    };
+    speechSynthesis.speak(this.utterance);
+    this.updatePlayBtn();
+  },
+
+  pause() {
+    speechSynthesis.pause();
+    this.playing = false;
+    this.updatePlayBtn();
+  },
+
+  resume() {
+    if (speechSynthesis.paused) {
+      speechSynthesis.resume();
+      this.playing = true;
+    } else {
+      // Re-speak kalimat saat ini
+      this.speakNext();
+    }
+    this.updatePlayBtn();
+  },
+
+  stop() {
+    speechSynthesis.cancel();
+    this.playing = false;
+    this.sentences = [];
+    this.idx = 0;
+    this.utterance = null;
+    this.updatePlayBtn();
+  },
+
+  prev() {
+    speechSynthesis.cancel();
+    this.idx = Math.max(0, this.idx - 1);
+    if (this.playing) this.speakNext();
+  },
+
+  next() {
+    speechSynthesis.cancel();
+    this.idx = Math.min(this.sentences.length - 1, this.idx + 1);
+    if (this.playing) this.speakNext();
+  },
+
+  togglePlay() {
+    if (!this.sentences.length) {
+      this.start(this.mode || appMode);
+    } else if (this.playing) {
+      this.pause();
+    } else {
+      this.resume();
+    }
+  },
+
+  updatePlayBtn() {
+    ['pdf', 'epub'].forEach(m => {
+      const btn = document.getElementById(m + '-tts-play');
+      if (!btn) return;
+      if (this.mode === m && this.playing) {
+        btn.textContent = '⏸';
+        btn.classList.remove('paused');
+      } else {
+        btn.textContent = '▶';
+        btn.classList.add('paused');
+      }
+    });
+  },
+
+  close(mode) {
+    this.stop();
+    document.getElementById(mode + '-tts-panel').classList.add('reader-hidden');
+    document.getElementById((mode==='pdf'?'pdf':'epub') + '-btn-tts')?.classList.remove('active');
+  }
+};
+
+// PDF TTS buttons
+document.getElementById('pdf-btn-tts').addEventListener('click', async () => {
+  const panel = document.getElementById('pdf-tts-panel');
+  if (!panel.classList.contains('reader-hidden')) {
+    TTS.close('pdf');
+  } else {
+    document.getElementById('pdf-btn-tts').classList.add('active');
+    await TTS.start('pdf');
+  }
+});
+document.getElementById('pdf-tts-play').addEventListener('click', () => TTS.togglePlay());
+document.getElementById('pdf-tts-prev').addEventListener('click', () => TTS.prev());
+document.getElementById('pdf-tts-next').addEventListener('click', () => TTS.next());
+document.getElementById('pdf-tts-close').addEventListener('click', () => {
+  TTS.close('pdf');
+  document.getElementById('pdf-btn-tts').classList.remove('active');
+});
+
+// EPUB TTS buttons
+document.getElementById('epub-btn-tts').addEventListener('click', async () => {
+  const panel = document.getElementById('epub-tts-panel');
+  if (!panel.classList.contains('reader-hidden')) {
+    TTS.close('epub');
+  } else {
+    document.getElementById('epub-btn-tts').classList.add('active');
+    await TTS.start('epub');
+  }
+});
+document.getElementById('epub-tts-play').addEventListener('click', () => TTS.togglePlay());
+document.getElementById('epub-tts-prev').addEventListener('click', () => TTS.prev());
+document.getElementById('epub-tts-next').addEventListener('click', () => TTS.next());
+document.getElementById('epub-tts-close').addEventListener('click', () => {
+  TTS.close('epub');
+  document.getElementById('epub-btn-tts').classList.remove('active');
+});
+
+// Stop TTS saat balik ke home
+const _origPdfBack  = document.getElementById('pdf-back').onclick;
+const _origEpubBack = document.getElementById('epub-back').onclick;
+
+// Patch: TTS stop saat back (tambahkan ke handler yang sudah ada)
+document.getElementById('pdf-back').addEventListener('click', () => TTS.stop());
+document.getElementById('epub-back').addEventListener('click', () => TTS.stop());
+
+// Stop TTS saat ganti halaman PDF
+const _origOnPDFFlip = onPDFFlip;
+// (onPDFFlip sudah ter-declare, kita patch via pdfFlip.on di buildPDFReader)

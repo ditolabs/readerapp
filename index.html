@@ -14,18 +14,16 @@
 </head>
 <body>
 
-<!-- ══════════════════════════════════════
-     HOME SCREEN
-     ══════════════════════════════════════ -->
+<!-- HOME -->
 <main id="screen-home">
   <header class="home-header">
     <div class="home-logo">📚 <em>Reader</em>App</div>
-    <button class="btn-pwa" id="btn-install" aria-label="Install aplikasi">⬇ Install App</button>
+    <button class="btn-pwa" id="btn-install">⬇ Install App</button>
   </header>
   <div class="home-body">
     <section>
       <div class="drop-zone" id="drop-zone">
-        <input type="file" id="file-input" accept=".pdf,.epub" aria-label="Pilih file PDF atau EPUB">
+        <input type="file" id="file-input" accept=".pdf,.epub">
         <span class="dz-icon">📖</span>
         <h3>Buka PDF atau EPUB</h3>
         <p>Seret file ke sini atau klik untuk memilih</p>
@@ -46,30 +44,22 @@
   </div>
 </main>
 
-<!-- ══════════════════════════════════════
-     PROGRESS SCREEN
-     ══════════════════════════════════════ -->
+<!-- PROGRESS -->
 <div id="screen-progress" class="reader-hidden">
   <div class="prog-num" id="prog-num">0</div>
   <div class="prog-label" id="prog-label">Memproses…</div>
-  <div class="prog-sub" id="prog-sub">Mohon tunggu</div>
-  <div class="prog-bar-bg">
-    <div class="prog-bar-fill" id="prog-fill"></div>
-  </div>
+  <div class="prog-sub"   id="prog-sub">Mohon tunggu</div>
+  <div class="prog-bar-bg"><div class="prog-bar-fill" id="prog-fill"></div></div>
   <button class="btn-cancel-prog" id="btn-cancel">Batal</button>
 </div>
 
-<!-- ══════════════════════════════════════
-     PDF READER
-     Pola dari DeepSeek: selalu ada di DOM,
-     show/hide via class reader-hidden/reader-visible
-     ══════════════════════════════════════ -->
+<!-- ══════════ PDF READER ══════════ -->
 <div id="reader-pdf" class="reader-hidden">
 
-  <!-- Tombol back SELALU visible, tidak ikut auto-hide, z-index tertinggi -->
-  <button class="pdf-back-fixed" id="pdf-back" title="Kembali ke menu utama">← Kembali</button>
+  <!-- Back — selalu visible, z-index tertinggi -->
+  <button class="pdf-back-fixed" id="pdf-back">← Kembali</button>
 
-  <!-- Toolbar — auto-hide, tap tengah untuk show -->
+  <!-- Toolbar auto-hide -->
   <div class="reader-toolbar" id="pdf-toolbar">
     <div class="toolbar-center">
       <span id="pdf-title" class="toolbar-title"></span>
@@ -79,43 +69,77 @@
     </div>
   </div>
 
-  <!-- Stage PDF -->
+  <!-- Stage -->
   <div class="reader-stage" id="pdf-stage">
     <div id="pdf-book"></div>
-
-    <!-- Tap zones: kiri=prev, kanan=next, tengah=toggle toolbar -->
     <div class="tap-zone tap-left"   id="tap-pdf-left"></div>
     <div class="tap-zone tap-right"  id="tap-pdf-right"></div>
     <div class="tap-zone tap-center" id="tap-pdf-center"></div>
   </div>
 
-  <!-- Bottom bar — auto-hide -->
+  <!-- Bottom bar auto-hide -->
   <div class="reader-bottom" id="pdf-bottom">
-    <!-- Thumbnails -->
     <div id="pdf-thumbs"></div>
-    <!-- Scrubber -->
-    <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0" aria-label="Posisi halaman">
-    <!-- Nav -->
+    <input type="range" class="scrubber" id="pdf-scrubber" min="0" value="0">
     <nav class="nav-row">
-      <button class="btn-nav" id="pdf-first" aria-label="Halaman pertama">⏮</button>
-      <button class="btn-nav" id="pdf-prev"  aria-label="Sebelumnya">‹</button>
+      <button class="btn-nav" id="pdf-first">⏮</button>
+      <button class="btn-nav" id="pdf-prev">‹</button>
       <span class="page-label" id="pdf-page-label">Hal <strong>1</strong>/1</span>
-      <button class="btn-nav" id="pdf-next" aria-label="Berikutnya">›</button>
-      <button class="btn-nav" id="pdf-last" aria-label="Halaman terakhir">⏭</button>
+      <button class="btn-nav" id="pdf-next">›</button>
+      <button class="btn-nav" id="pdf-last">⏭</button>
     </nav>
+    <!-- Toolbar fitur tambahan -->
+    <div class="feat-row">
+      <button class="feat-btn" id="pdf-btn-zoom-out" title="Zoom out">🔍-</button>
+      <button class="feat-btn" id="pdf-btn-zoom-in"  title="Zoom in">🔍+</button>
+      <button class="feat-btn" id="pdf-btn-toc"      title="Daftar Isi">☰</button>
+      <button class="feat-btn" id="pdf-btn-grid"     title="Semua Halaman">⊞</button>
+      <button class="feat-btn" id="pdf-btn-tts"      title="Text-to-Speech">🔊</button>
+    </div>
+  </div>
+
+  <!-- TOC Panel -->
+  <div class="side-panel reader-hidden" id="pdf-toc-panel">
+    <div class="panel-header">
+      <h3>Daftar Isi</h3>
+      <button class="panel-close" id="pdf-toc-close">✕</button>
+    </div>
+    <div class="panel-body" id="pdf-toc-list"></div>
+  </div>
+
+  <!-- Thumbnail Grid Modal -->
+  <div class="grid-modal reader-hidden" id="pdf-grid-modal">
+    <div class="grid-modal-header">
+      <span>Semua Halaman</span>
+      <button class="panel-close" id="pdf-grid-close">✕</button>
+    </div>
+    <div class="grid-body" id="pdf-grid-body"></div>
+  </div>
+
+  <!-- TTS Panel -->
+  <div class="tts-panel reader-hidden" id="pdf-tts-panel">
+    <div class="tts-info" id="pdf-tts-text">Ketuk ▶ untuk mulai membaca</div>
+    <div class="tts-controls">
+      <button class="tts-btn" id="pdf-tts-prev">⏮</button>
+      <button class="tts-btn tts-play" id="pdf-tts-play">▶</button>
+      <button class="tts-btn" id="pdf-tts-next">⏭</button>
+      <button class="tts-btn" id="pdf-tts-close">✕</button>
+    </div>
   </div>
 
 </div>
 
-<!-- ══════════════════════════════════════
-     EPUB READER
-     ══════════════════════════════════════ -->
+<!-- ══════════ EPUB READER ══════════ -->
 <div id="reader-epub" class="reader-hidden">
 
   <div id="epub-top">
     <button class="epub-btn" id="epub-back">← Kembali</button>
     <div id="epub-title-bar">—</div>
-    <button class="epub-btn" id="btn-epub-settings" aria-expanded="false">⚙</button>
+    <div class="epub-top-actions">
+      <button class="epub-btn" id="epub-btn-toc"      title="Daftar Isi">☰</button>
+      <button class="epub-btn" id="epub-btn-tts"      title="TTS">🔊</button>
+      <button class="epub-btn" id="btn-epub-settings" title="Pengaturan">⚙</button>
+    </div>
 
     <!-- Settings panel -->
     <div id="epub-settings">
@@ -146,6 +170,15 @@
 
   <div id="epub-area">
     <div id="epub-viewer"></div>
+
+    <!-- TOC Panel -->
+    <div class="side-panel reader-hidden" id="epub-toc-panel">
+      <div class="panel-header">
+        <h3>Daftar Isi</h3>
+        <button class="panel-close" id="epub-toc-close">✕</button>
+      </div>
+      <div class="panel-body" id="epub-toc-list"></div>
+    </div>
   </div>
 
   <div id="epub-bottom">
@@ -155,6 +188,17 @@
       <span class="epub-page-label" id="epub-page-label">—</span>
       <button class="epub-nav-btn" id="epub-next">›</button>
     </nav>
+  </div>
+
+  <!-- TTS Panel EPUB -->
+  <div class="tts-panel reader-hidden" id="epub-tts-panel">
+    <div class="tts-info" id="epub-tts-text">Ketuk ▶ untuk mulai membaca</div>
+    <div class="tts-controls">
+      <button class="tts-btn" id="epub-tts-prev">⏮</button>
+      <button class="tts-btn tts-play" id="epub-tts-play">▶</button>
+      <button class="tts-btn" id="epub-tts-next">⏭</button>
+      <button class="tts-btn" id="epub-tts-close">✕</button>
+    </div>
   </div>
 
 </div>

@@ -276,3 +276,170 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
   z-index: 9999; opacity: 0; transition: all .25s;
   pointer-events: none; white-space: nowrap; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ═══════════════════════════════════════
+   FITUR TAMBAHAN
+   ═══════════════════════════════════════ */
+
+/* Feat row di bottom bar */
+.feat-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 8px; padding-top: 4px;
+}
+.feat-btn {
+  background: rgba(255,255,255,.12); border: none; color: #fff;
+  width: 38px; height: 38px; border-radius: 10px; font-size: 15px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .15s; flex-shrink: 0;
+}
+.feat-btn:hover  { background: var(--accent); color: #000; }
+.feat-btn.active { background: var(--accent); color: #000; }
+
+/* EPUB top actions */
+.epub-top-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* ── Side Panel (TOC) ── */
+.side-panel {
+  position: absolute; top: 0; left: 0; bottom: 0;
+  width: min(320px, 85vw);
+  background: #fff; z-index: 200;
+  display: flex; flex-direction: column;
+  box-shadow: 4px 0 24px rgba(0,0,0,.3);
+  animation: slideInLeft .25s ease;
+}
+.side-panel.reader-hidden { display: none !important; }
+
+@keyframes slideInLeft {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+.panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid #eee;
+  flex-shrink: 0;
+}
+.panel-header h3 { font-size: 16px; font-weight: 700; color: #222; }
+.panel-close {
+  background: none; border: none; font-size: 18px; cursor: pointer;
+  color: #888; padding: 4px 8px; border-radius: 6px;
+}
+.panel-close:hover { background: #f0f0f0; color: #333; }
+
+.panel-body { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+.toc-item {
+  padding: 10px 20px; cursor: pointer; font-size: 14px; color: #333;
+  border-left: 3px solid transparent; transition: all .15s;
+  line-height: 1.4;
+}
+.toc-item:hover  { background: #f5f5f5; border-left-color: var(--accent); }
+.toc-item.active { background: #fff8ed; border-left-color: var(--accent); font-weight: 600; }
+.toc-item.indent-1 { padding-left: 32px; font-size: 13px; color: #555; }
+.toc-item.indent-2 { padding-left: 44px; font-size: 12px; color: #777; }
+.toc-empty { padding: 24px 20px; color: #aaa; font-size: 14px; text-align: center; }
+
+/* ── Thumbnail Grid Modal ── */
+.grid-modal {
+  position: absolute; inset: 0; z-index: 300;
+  background: rgba(0,0,0,.95);
+  display: flex; flex-direction: column;
+  animation: fadeIn .2s ease;
+}
+.grid-modal.reader-hidden { display: none !important; }
+
+@keyframes fadeIn {
+  from { opacity: 0; } to { opacity: 1; }
+}
+
+.grid-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,.1);
+  color: #fff; font-size: 15px; font-weight: 600; flex-shrink: 0;
+}
+
+.grid-body {
+  flex: 1; overflow-y: auto; padding: 12px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+}
+
+.grid-thumb {
+  aspect-ratio: 0.707; background: #333; border-radius: 6px;
+  overflow: hidden; cursor: pointer; position: relative;
+  border: 2px solid transparent; transition: border-color .15s;
+}
+.grid-thumb:hover  { border-color: var(--accent); }
+.grid-thumb.active { border-color: var(--accent); }
+.grid-thumb img    { width: 100%; height: 100%; object-fit: cover; display: block; }
+.grid-thumb-num {
+  position: absolute; bottom: 4px; left: 0; right: 0;
+  text-align: center; font-size: 10px; color: rgba(255,255,255,.8);
+  text-shadow: 0 1px 3px rgba(0,0,0,.8);
+}
+.grid-loading {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; font-size: 11px; color: #666;
+}
+
+/* ── TTS Panel ── */
+.tts-panel {
+  position: absolute; bottom: 0; left: 0; right: 0; z-index: 250;
+  background: rgba(20,20,30,.97);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid rgba(255,255,255,.1);
+  padding: 14px 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  animation: slideUp .25s ease;
+}
+.tts-panel.reader-hidden { display: none !important; }
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.tts-info {
+  font-size: 13px; color: rgba(255,255,255,.75);
+  line-height: 1.5; min-height: 40px;
+  overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.tts-info .tts-highlight { color: var(--accent); font-weight: 600; }
+
+.tts-controls {
+  display: flex; align-items: center; justify-content: center; gap: 12px;
+}
+.tts-btn {
+  background: rgba(255,255,255,.12); border: none; color: #fff;
+  width: 42px; height: 42px; border-radius: 50%; font-size: 16px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .15s;
+}
+.tts-btn:hover { background: rgba(255,255,255,.25); }
+.tts-play {
+  width: 52px; height: 52px; font-size: 20px;
+  background: var(--accent); color: #000;
+}
+.tts-play:hover  { background: #f0c060; }
+.tts-play.paused { background: rgba(255,255,255,.2); color: #fff; }
+
+/* EPUB TTS panel lebih tinggi karena tidak ada background gelap */
+#reader-epub .tts-panel {
+  background: rgba(30,30,50,.95);
+}
+
+/* PDF side panel — gelap */
+#reader-pdf .side-panel {
+  background: #1e1e2e; border-right: 1px solid rgba(255,255,255,.1);
+  box-shadow: 4px 0 24px rgba(0,0,0,.6);
+}
+#reader-pdf .panel-header { border-bottom-color: rgba(255,255,255,.1); }
+#reader-pdf .panel-header h3 { color: #eee; }
+#reader-pdf .panel-close { color: #888; }
+#reader-pdf .panel-close:hover { background: rgba(255,255,255,.1); color: #fff; }
+#reader-pdf .toc-item { color: #ccc; }
+#reader-pdf .toc-item:hover  { background: rgba(255,255,255,.08); }
+#reader-pdf .toc-item.active { background: rgba(232,176,75,.15); color: #e8b04b; }
+#reader-pdf .toc-item.indent-1 { color: #aaa; }
+#reader-pdf .toc-item.indent-2 { color: #888; }
+#reader-pdf .toc-empty { color: #666; }
